@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="ta" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube AI Studio - Video Hub & On-Demand Creator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .font-mono { font-family: 'JetBrains Mono', monospace; }
+    .glass-card {
+      background: radial-gradient(120% 120% at 50% 0%, rgba(26, 34, 52, 0.45) 0%, rgba(11, 15, 25, 0.75) 100%);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+    }
+    .custom-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+    .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); border-radius: 8px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: rgba(244, 63, 94, 0.4); border-radius: 8px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(244, 63, 94, 0.8); }
+    input[type="time"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.8) sepia(100%) saturate(500%) hue-rotate(300deg);
+      cursor: pointer;
+    }
+    .smooth-scroll { scroll-behavior: smooth; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .glass-card .flex > div { min-width: 0; }
+    .glass-card > .flex { max-width: 100%; }
+    @media (max-width: 639px) {
+      body > .fixed { display: none; }
+      .glass-card h3 { max-width: 100%; }
+    }
+  </style>
+</head>
+<body class="bg-[#06080e] text-slate-100 min-h-screen antialiased selection:bg-rose-500 selection:text-white pb-12">
+
+  <div class="fixed top-0 left-1/4 w-96 h-96 bg-rose-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+  <div class="fixed top-1/3 right-10 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none -z-10"></div>
+
+  <!-- Header -->
+  <header class="sm:sticky top-0 z-40 glass-card border-b border-white/[0.06] px-4 sm:px-6 py-3.5 flex flex-wrap gap-3 justify-between items-center">
+    <div class="flex items-center gap-3">
+      <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-600 via-rose-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-rose-500/25">
+        <span class="text-lg">⚡</span>
+      </div>
+      <div>
+        <h1 class="text-sm font-extrabold tracking-wide uppercase bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
+          YouTube AI Studio Pro
+        </h1>
+        <div class="flex items-center gap-2">
+          <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span class="text-[11px] text-slate-400 font-mono">{{ 'Scheduler running' if automation_running else 'Automation paused' }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header Actions -->
+    <div class="flex items-center gap-2.5 max-w-full overflow-x-auto custom-scroll">
+      <button onclick="openLiveChatModal()"
+              class="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl shadow-md transition flex items-center gap-1.5 animate-pulse">
+        <span>🔴</span> Live Chat Box
+      </button>
+
+      <button onclick="switchMainTab('comments')"
+              class="bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 text-indigo-300 font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5">
+        <span>💬</span> Comments (24h)
+      </button>
+
+      <button onclick="triggerTopInstantShort()"
+              class="bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 hover:to-indigo-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl shadow-md transition flex items-center gap-1.5">
+        <span>⚡</span> One-Click Short
+      </button>
+
+      <div class="hidden sm:flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-xl text-xs font-bold text-emerald-400 font-mono">
+        <span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
+        <span>● {{ channel_name }}</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN NAVIGATION TABS (Controls Page Load & Visual Clutter) -->
+  <nav class="sticky top-0 sm:top-[61px] z-30 bg-[#070b14]/90 backdrop-blur-md border-b border-white/[0.08] px-4 sm:px-6 py-2.5">
+    <div class="max-w-6xl mx-auto flex items-center gap-2 overflow-x-auto custom-scroll">
+      <button onclick="switchMainTab('overview')" id="tabNav-overview" class="main-tab-nav bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 flex-shrink-0 shadow">
+        <span>📊</span> Overview &amp; Telemetry
+      </button>
+      <button onclick="switchMainTab('comments')" id="tabNav-comments" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0">
+        <span>💬</span> Live Chat &amp; 24h Comments Hub
+      </button>
+      <button onclick="switchMainTab('library')" id="tabNav-library" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0">
+        <span>🎬</span> Media Library ({{ total_uploads_count }} loaded)
+      </button>
+      <button onclick="switchMainTab('scheduler')" id="tabNav-scheduler" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0">
+        <span>⏰</span> Scheduler &amp; 1-Hour Drafts
+      </button>
+      <button onclick="switchMainTab('settings')" id="tabNav-settings" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex-shrink-0">⚙️ Settings</button>
+      <button onclick="switchMainTab('all')" id="tabNav-all" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-400 font-bold text-xs px-3.5 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1 flex-shrink-0">
+        <span>🌐</span> All-in-One View
+      </button>
+    </div>
+  </nav>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-8">
+
+
+    <section class="glass-card p-4 rounded-2xl space-y-3 text-sm">
+      <div class="flex flex-wrap gap-4 items-center">
+        <span>YouTube: {{ 'Connected' if yt_connected else 'Not connected' }}</span>
+        <span>Gemini: {{ 'Key configured (tested on use)' if ai_configured else 'Missing API key' }}</span>
+        <span>Times: {{ timezone }}</span>
+        <a href="/auth/youtube" class="px-3 py-2 bg-red-600 rounded-lg">Connect / Reconnect YouTube</a>
+        <form action="/logout" method="post"><button class="px-3 py-2 bg-slate-700 rounded-lg">Sign out</button></form>
+      </div>
+      {% if analytics.error %}<p class="text-amber-300">{{ analytics.error }}</p>{% endif %}
+      {% for error in errors %}<p class="text-amber-300">{{ error }}</p>{% endfor %}
+      <p class="text-xs text-slate-400">API data may be cached (statistics: 5 minutes, library: 15 minutes). Short candidates are inferred from duration, dimensions or #Shorts; YouTube does not expose a definitive Shorts flag here.</p>
+      <div id="actionError" role="alert" class="hidden p-3 bg-red-950 text-red-200 rounded-lg"></div>
+      <details><summary class="cursor-pointer">Activity / errors</summary><pre id="activityLog" class="whitespace-pre-wrap text-xs mt-2">{{ logs | join('\n') }}</pre></details>
+    </section>
+    <!-- LIVE STREAM INTERACTIVE POPUP MODAL -->
+    <div id="liveChatModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-opacity">
+      <div class="glass-card w-full max-w-2xl rounded-3xl border-2 border-red-500/50 p-6 sm:p-7 relative shadow-2xl space-y-4 bg-gradient-to-b from-[#160d14] via-[#0d111c] to-[#080b12]">
+        
+        <div class="flex items-center justify-between border-b border-red-500/20 pb-3.5">
+          <div class="flex items-center gap-3">
+            <div class="h-11 w-11 rounded-xl bg-red-600/30 border border-red-500 flex items-center justify-center text-xl animate-pulse text-white">
+              🔴
+            </div>
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="bg-red-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full">LIVE CHAT BOX</span>
+                <span id="modalLiveBadge" class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30">{{ 'Auto reply enabled' if settings.live_chat_reply and ai_configured and automation_running else 'Auto reply unavailable or off' }}</span>
+              </div>
+              <h3 id="modalLiveTitle" class="text-sm font-extrabold text-white truncate max-w-full sm:max-w-[360px] mt-0.5">{{ comments_hub.active_stream_title or 'No active live stream' }}</h3>
+            </div>
+          </div>
+          <button onclick="closeLiveChatModal()" class="text-slate-400 hover:text-white p-1 rounded-lg text-lg">✕</button>
+        </div>
+
+        <!-- Live Viewers & Likes Telemetry Bar -->
+        <div class="grid grid-cols-2 gap-3 text-xs font-mono">
+          <div class="p-2.5 rounded-xl bg-slate-900/90 border border-white/[0.06] flex items-center justify-between">
+            <span class="text-slate-400">👁️ Concurrent Viewers:</span>
+            <span id="modalViewersCount" class="font-bold text-rose-400 text-sm">{{ comments_hub.live_viewers if comments_hub.live_viewers is not none else 'Unavailable' }}</span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-slate-900/90 border border-white/[0.06] flex items-center justify-between">
+            <span class="text-slate-400">❤️ Stream Likes:</span>
+            <span id="modalLikesCount" class="font-bold text-emerald-400 text-sm">{{ comments_hub.live_likes if comments_hub.live_likes is not none else 'Unavailable' }}</span>
+          </div>
+        </div>
+
+        <!-- Live Chat Message Stream Box -->
+        <div id="modalChatFeed" class="h-60 overflow-y-auto custom-scroll space-y-2 font-mono text-xs p-3.5 rounded-2xl bg-black/70 border border-white/[0.08]">
+          {% if comments_hub.live_chat_history %}
+            {% for chat in comments_hub.live_chat_history %}
+              <div class="p-2.5 rounded-xl bg-slate-900/90 border border-white/[0.05] space-y-1">
+                <div class="flex justify-between items-center">
+                  <span class="text-rose-400 font-bold">@{{ chat.author }}</span>
+                  <span class="text-[10px] text-slate-500">{{ chat.time }}</span>
+                </div>
+                <p class="text-slate-200 text-xs">"{{ chat.message }}"</p>
+                <div class="text-[11px] text-emerald-400 bg-emerald-950/40 p-1.5 rounded-lg border border-emerald-500/30 flex items-center gap-1.5">
+                  <span>🤖 AI:</span>
+                  <span>{{ chat.reply }}</span>
+                </div>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="text-center py-12 text-slate-400 text-xs">
+              <span>No confirmed chat replies in this session.</span>
+            </div>
+          {% endif %}
+        </div>
+
+        <!-- Send Custom Host Message Directly -->
+        <form onsubmit="event.preventDefault(); sendLiveChatMessage();" class="flex gap-2 pt-1">
+          <input type="text" id="liveMsgInput" placeholder="Send official message / shoutout to live chat..." required
+                 class="flex-1 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 focus:outline-none focus:border-rose-500">
+          <button type="submit" class="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow transition">
+            Send ➔
+          </button>
+        </form>
+
+      </div>
+    </div>
+
+    <!-- REAL-TIME CREATION PROCESS POPUP MODAL -->
+    <div id="creationModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md transition-opacity">
+      <div class="glass-card w-full max-w-lg rounded-3xl border border-rose-500/30 p-6 sm:p-7 relative shadow-2xl space-y-5 bg-gradient-to-b from-[#111726] to-[#080b12]">
+        
+        <div class="flex items-center justify-between border-b border-white/[0.08] pb-3.5">
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-rose-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-rose-600/30 text-lg">
+              ⚡
+            </div>
+            <div>
+              <h3 class="text-base font-extrabold text-white">AI Short Creation Engine</h3>
+              <p id="modalVideoTitle" class="text-xs text-rose-300 font-medium truncate max-w-[280px]">Connecting to video stream...</p>
+            </div>
+          </div>
+          <button onclick="dismissModal()" id="modalCloseBtn" class="text-slate-400 hover:text-white p-1 rounded-lg text-lg">✕</button>
+        </div>
+
+        <div class="space-y-1.5">
+          <div class="flex justify-between items-center text-xs font-mono">
+            <span id="modalProgressText" class="text-slate-300 font-semibold truncate max-w-[320px]">Initializing creation pipeline...</span>
+            <span id="modalProgressPercent" class="text-rose-400 font-bold text-sm">0%</span>
+          </div>
+          <div class="w-full h-3 bg-slate-950 rounded-full overflow-hidden p-0.5 border border-white/[0.08]">
+            <div id="modalProgressBar" class="h-full bg-gradient-to-r from-rose-600 via-indigo-600 to-emerald-500 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div class="space-y-2 text-xs font-mono">
+          <div id="stepItem1" class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition">
+            <span id="stepIcon1" class="h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]">1</span>
+            <span class="flex-1 text-slate-300">📥 Snip 30s Segment (yt-dlp &amp; FFmpeg)</span>
+            <span id="stepBadge1" class="text-[10px] text-slate-500">Pending</span>
+          </div>
+
+          <div id="stepItem2" class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition">
+            <span id="stepIcon2" class="h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]">2</span>
+            <span class="flex-1 text-slate-300">📐 Crop to 9:16 Vertical 1080x1920 Short</span>
+            <span id="stepBadge2" class="text-[10px] text-slate-500">Pending</span>
+          </div>
+
+          <div id="stepItem3" class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition">
+            <span id="stepIcon3" class="h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]">3</span>
+            <span class="flex-1 text-slate-300">🧠 Generate source-based metadata (Gemini AI)</span>
+            <span id="stepBadge3" class="text-[10px] text-slate-500">Pending</span>
+          </div>
+
+          <div id="stepItem4" class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition">
+            <span id="stepIcon4" class="h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]">4</span>
+            <span class="flex-1 text-slate-300">🚀 Upload with selected visibility / schedule</span>
+            <span id="stepBadge4" class="text-[10px] text-slate-500">Pending</span>
+          </div>
+
+          <div id="stepItem5" class="flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition">
+            <span id="stepIcon5" class="h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]">5</span>
+            <span class="flex-1 text-slate-300">📋 Verify upload and playlist result</span>
+            <span id="stepBadge5" class="text-[10px] text-slate-500">Pending</span>
+          </div>
+        </div>
+
+        <div id="modalStatusLog" class="p-2.5 rounded-xl bg-black/60 border border-white/[0.06] text-[11px] font-mono text-emerald-400 truncate">
+          Connecting to pipeline...
+        </div>
+
+        <div id="modalSuccessBox" class="hidden p-4 rounded-2xl bg-emerald-950/40 border border-emerald-500/40 space-y-3">
+          <div class="flex items-center gap-2.5 text-emerald-400 font-bold text-xs">
+            <span class="text-lg">🎉</span>
+            <span>Upload confirmed — see actual visibility and schedule above.</span>
+          </div>
+          <div class="flex flex-wrap gap-2 pt-1">
+            <a id="modalWatchShortBtn" href="#" target="_blank" class="flex-1 bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 text-white font-bold text-xs py-2.5 px-3 rounded-xl text-center shadow transition flex items-center justify-center gap-1.5">
+              <span>▶</span> Watch Short on YouTube
+            </a>
+            <a id="modalPlaylistBtn" href="#" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 border border-slate-700">
+              <span>📋</span> View Playlist
+            </a>
+          </div>
+        </div>
+
+        <div id="modalErrorBox" class="hidden p-3.5 rounded-2xl bg-rose-950/40 border border-rose-500/40 text-rose-300 text-xs font-mono space-y-1.5">
+          <div class="font-bold flex items-center gap-2 text-rose-400">
+            <span>⚠️</span> Creation Issue Encountered
+          </div>
+          <p id="modalErrorText" class="text-[11px] text-rose-300">Error details...</p>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2 border-t border-white/[0.06]">
+          <button onclick="dismissModal()" id="modalDoneBtn" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl transition">
+            Close
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- VIEW 1: OVERVIEW & TELEMETRY SECTION -->
+    <div id="viewContainer-overview" class="view-section space-y-6">
+      
+      <!-- Channel Full Analytics Telemetry -->
+      <div class="space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+              <span>📊</span> Channel Performance &amp; Telemetry
+            </h2>
+            <p class="text-xs text-slate-400">Total View Count, Subscribers &amp; Analytics for {{ channel_name }}</p>
+          </div>
+          <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full">
+            {{ analytics.source }}
+          </span>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="glass-card p-5 rounded-2xl border border-rose-500/30">
+            <p class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Subscribers</p>
+            <h3 class="text-2xl sm:text-3xl font-black mt-1.5 text-white font-mono">{{ analytics.subscribers }}</h3>
+            <span class="text-[10px] text-emerald-400 font-medium mt-1 inline-block">As reported by YouTube</span>
+          </div>
+
+          <div class="glass-card p-5 rounded-2xl">
+            <p class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Total Lifetime Views</p>
+            <h3 class="text-2xl sm:text-3xl font-black mt-1.5 text-rose-400 font-mono">{{ analytics.views }}</h3>
+            <span class="text-[10px] text-rose-300 font-medium mt-1 inline-block">Lifetime views reported by YouTube</span>
+          </div>
+
+          <div class="glass-card p-5 rounded-2xl">
+            <p class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Public Video Count</p>
+            <h3 class="text-2xl sm:text-3xl font-black mt-1.5 text-indigo-400 font-mono">{{ analytics.videos }}</h3>
+            <span class="text-[10px] text-indigo-300 font-medium mt-1 inline-block">{{ total_uploads_count }} videos loaded (including non-public uploads)</span>
+          </div>
+
+          <div class="glass-card p-5 rounded-2xl">
+            <p class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Joined Date</p>
+            <h3 class="text-xl sm:text-2xl font-black mt-2 text-slate-200 font-mono">{{ analytics.joined }}</h3>
+            <span class="text-[10px] text-slate-400 font-medium mt-1 inline-block">Channel creation date</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Auto-Managed Public Playlist Banner -->
+      <div class="glass-card p-4 sm:p-5 rounded-2xl border border-indigo-500/30 bg-gradient-to-r from-indigo-950/40 via-slate-900 to-rose-950/20 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div class="flex items-center gap-3.5">
+          <div class="h-11 w-11 rounded-xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center text-xl flex-shrink-0">
+            📋
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h4 class="text-sm font-bold text-white">Auto Public Playlist: ⚡ Channel Shorts &amp; Highlights</h4>
+              <span class="text-xs text-slate-400">{{ "Playlist linked" if playlist_id else "Created after upload" }}</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">பாட் உருவாக்கும் அனைத்து புதிய Shorts-களும் இந்த பப்ளிக் பிளேலிஸ்ட்டில் தானாக சேர்க்கப்படும்!</p>
+          </div>
+        </div>
+
+        {% if playlist_id %}
+          <a href="https://www.youtube.com/playlist?list={{ playlist_id }}" target="_blank" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg shadow-indigo-600/30 flex-shrink-0">
+            <span>Open on YouTube</span> ➔
+          </a>
+        {% else %}
+          <span class="text-[11px] font-mono text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-3 py-1.5 rounded-xl">Checked after upload</span>
+        {% endif %}
+      </div>
+
+      <!-- Live Active Banner (If live) -->
+      {% if comments_hub.live_chat_active %}
+        <div class="glass-card p-6 rounded-3xl border-2 border-red-500/60 bg-gradient-to-r from-red-950/40 via-slate-900 to-rose-950/30 shadow-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div class="flex items-center gap-3.5">
+            <div class="h-12 w-12 rounded-2xl bg-red-600/30 border border-red-500 flex items-center justify-center text-2xl flex-shrink-0 animate-bounce">
+              🔴
+            </div>
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="bg-red-600 text-white font-black text-xs px-2.5 py-0.5 rounded-full uppercase tracking-wider animate-pulse">LIVE NOW</span>
+                <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/30 font-bold">👁️ {{ comments_hub.live_viewers if comments_hub.live_viewers is not none else "Unavailable" }} Viewers</span>
+                <span class="text-xs font-mono text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/30 font-bold">❤️ {{ comments_hub.live_likes if comments_hub.live_likes is not none else "Unavailable" }} Likes</span>
+              </div>
+              <h3 class="text-base font-extrabold text-white mt-1 truncate max-w-full md:max-w-xl">{{ comments_hub.active_stream_title }}</h3>
+              <p class="text-xs text-slate-300 mt-0.5">YouTube reports an active broadcast. Chat replies follow your settings.</p>
+            </div>
+          </div>
+
+          <button onclick="openLiveChatModal()" class="bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg transition flex items-center gap-2 flex-shrink-0">
+            <span>💬</span> Open Live Chat Popup
+          </button>
+        </div>
+      {% endif %}
+
+      <form action="/generate-growth-plan" method="post"><button class="bg-indigo-600 rounded-xl px-4 py-2 text-sm">Generate channel-based content suggestions</button></form>
+      <!-- AI Real Niche Growth Strategy -->
+      <div class="glass-card p-6 sm:p-7 rounded-3xl border border-indigo-500/20 relative space-y-4 bg-gradient-to-r from-indigo-950/20 via-slate-900 to-rose-950/20">
+        <div class="flex justify-between items-center border-b border-white/[0.06] pb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-lg">💡</span>
+              <h2 class="text-base font-bold text-white">AI Content Suggestions</h2>
+            </div>
+            <p class="text-xs text-slate-400">Niche: <strong class="text-indigo-300 font-mono">{{ growth_plan.detected_niche }}</strong></p>
+          </div>
+          <span class="bg-indigo-500/20 text-indigo-300 text-xs font-mono font-bold px-3 py-1 rounded-full border border-indigo-500/30">
+            Suggestions, not analytics
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {% for idea in growth_plan.ideas %}
+            <div class="p-4 rounded-2xl bg-slate-900/60 border border-white/[0.06] space-y-1.5">
+              <div class="flex items-center justify-between text-[11px] font-mono">
+                <span class="text-rose-400 font-bold">{{ idea.type }}</span>
+                <span class="text-emerald-400 font-bold">⏰ {{ idea.best_time }}</span>
+              </div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-100">{{ idea.title }}</h4>
+              <p class="text-xs text-slate-400 line-clamp-2">{{ idea.concept }}</p>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- VIEW 2: LIVE CHAT & 24H COMMENTS HUB -->
+    <div id="viewContainer-comments" class="view-section space-y-6">
+      
+      <div id="commentsHubSection" class="glass-card p-6 sm:p-7 rounded-3xl border border-rose-500/30 space-y-5 bg-gradient-to-b from-[#111728] to-[#070a12]">
+        
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/[0.08] pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xl">💬</span>
+              <h2 class="text-lg font-black text-white">Recent Comments &amp; AI Auto-Replies Hub</h2>
+              <span class="text-[10px] font-mono text-rose-400 bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/30 font-bold">
+                Last 1 Day (24 Hours)
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">
+              சமீபத்திய 24 மணி நேரத்தில் வந்த கமெண்ட்டுகள், பாட் அளித்த AI பதில்கள் மற்றும் லைவ் சாட் நிலவரம்.
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <form action="/reply-all-comments" method="POST" onsubmit="this.querySelector('button').innerHTML='<span>⏳</span> AI Auto-Replying...'; this.querySelector('button').classList.add('opacity-75');">
+              <button type="submit" class="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-lg transition flex items-center gap-1.5">
+                <span>🤖</span> Auto-Reply All Pending (AI)
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Quick Metrics Counters -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+          <div class="p-3 rounded-xl bg-slate-900/80 border border-white/[0.05] flex items-center justify-between">
+            <span class="text-slate-400">Total (24h):</span>
+            <span class="font-bold text-white text-sm">{{ comments_hub.stats.total if (comments_hub.stats is defined and comments_hub.stats.total is defined) else 0 }}</span>
+          </div>
+          <div class="p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/20 flex items-center justify-between">
+            <span class="text-emerald-300">✅ Confirmed replies:</span>
+            <span class="font-bold text-emerald-400 text-sm">{{ comments_hub.stats.replied if (comments_hub.stats is defined and comments_hub.stats.replied is defined) else 0 }}</span>
+          </div>
+          <div class="p-3 rounded-xl bg-amber-950/30 border border-amber-500/20 flex items-center justify-between">
+            <span class="text-amber-300">⏳ Pending:</span>
+            <span class="font-bold text-amber-400 text-sm">{{ comments_hub.stats.pending if (comments_hub.stats is defined and comments_hub.stats.pending is defined) else 0 }}</span>
+          </div>
+          <div class="p-3 rounded-xl {% if comments_hub.live_chat_active %}bg-red-950/40 border-red-500/40 text-red-400{% else %}bg-slate-900/80 border-slate-800 text-slate-500{% endif %} border flex items-center justify-between">
+            <span>🔴 Live Chat:</span>
+            <span class="font-bold">{% if comments_hub.live_chat_active %}ACTIVE ●{% else %}Offline{% endif %}</span>
+          </div>
+        </div>
+
+        <!-- Categorized Filter Tabs -->
+        <div class="flex items-center gap-2 overflow-x-auto custom-scroll pb-1">
+          <button onclick="switchCommentTab('tab-all')" id="btn-tab-all" class="comment-tab-btn bg-rose-600 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition flex-shrink-0">
+            ✨ All 24h ({{ comments_hub.all|length }})
+          </button>
+          <button onclick="switchCommentTab('tab-videos')" id="btn-tab-videos" class="comment-tab-btn bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3.5 py-1.5 rounded-xl border border-slate-800 transition flex-shrink-0">
+            🎬 Long Videos ({{ comments_hub.videos|length }})
+          </button>
+          <button onclick="switchCommentTab('tab-shorts')" id="btn-tab-shorts" class="comment-tab-btn bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3.5 py-1.5 rounded-xl border border-slate-800 transition flex-shrink-0">
+            📱 Short candidates ({{ comments_hub.shorts|length }})
+          </button>
+          <button onclick="switchCommentTab('tab-live')" id="btn-tab-live" class="comment-tab-btn bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3.5 py-1.5 rounded-xl border border-slate-800 transition flex-shrink-0">
+            🔴 Live Streams ({{ comments_hub.live|length }})
+          </button>
+          <button onclick="switchCommentTab('tab-live_finished')" id="btn-tab-live_finished" class="comment-tab-btn bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3.5 py-1.5 rounded-xl border border-slate-800 transition flex-shrink-0">
+            🏁 Finished Live ({{ comments_hub.live_finished|length }})
+          </button>
+        </div>
+
+        <!-- Comments List Container -->
+        <div id="commentsListContainer" class="space-y-3 pt-1">
+          {% if comments_hub.all %}
+            {% for c in comments_hub.all %}
+              <div class="comment-item-card p-4 rounded-2xl bg-slate-900/80 border border-white/[0.06] hover:border-slate-700 transition flex flex-col md:flex-row justify-between items-start md:items-center gap-4"
+                   data-cat="tab-{{ c.category }}">
+                
+                <div class="flex items-start gap-3.5 max-w-2xl">
+                  {% if c.video_thumbnail %}
+                    <div class="w-16 h-12 rounded-lg overflow-hidden bg-slate-950 flex-shrink-0 border border-white/[0.08]">
+                      <img src="{{ c.video_thumbnail }}" class="w-full h-full object-cover">
+                    </div>
+                  {% endif %}
+
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase
+                        {% if c.category == 'shorts' %}bg-rose-600/20 text-rose-300 border border-rose-500/30
+                        {% elif c.category == 'live' %}bg-red-600/20 text-red-300 border border-red-500/30
+                        {% elif c.category == 'live_finished' %}bg-amber-600/20 text-amber-300 border border-amber-500/30
+                        {% else %}bg-indigo-600/20 text-indigo-300 border border-indigo-500/30{% endif %}">
+                        {{ c.category }}
+                      </span>
+                      <span class="text-xs font-bold text-white truncate max-w-[220px]" title="{{ c.video_title }}">{{ c.video_title }}</span>
+                    </div>
+
+                    <div class="text-xs text-slate-300 flex items-center gap-1.5 flex-wrap">
+                      <strong class="text-rose-400 font-semibold">@{{ c.author }}</strong>
+                      <span class="text-slate-500 font-mono text-[10px]">• {{ c.published_at }}</span>
+                    </div>
+                    <p class="text-xs text-slate-200 bg-black/40 p-2 rounded-lg border border-white/[0.04] italic">
+                      "{{ c.text }}"
+                    </p>
+
+                    {% if c.is_replied %}
+                      <div class="text-xs bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-lg text-emerald-300 space-y-0.5">
+                        <div class="flex items-center gap-1.5 font-bold text-[11px] text-emerald-400">
+                          <span>Confirmed channel reply</span>
+                          {% if c.bot_reply_time %}<span class="text-[10px] text-emerald-500 font-mono">({{ c.bot_reply_time }})</span>{% endif %}
+                        </div>
+                        <p class="text-[11px] text-emerald-200">↳ {{ c.bot_reply if c.bot_reply else "Auto-reply sent to viewer!" }}</p>
+                      </div>
+                    {% else %}
+                      <div class="text-[11px] font-mono text-amber-400 flex items-center gap-1">
+                        <span>⏳</span> Pending Bot Reply
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2 flex-shrink-0 w-full md:w-auto justify-end">
+                  {% if not c.is_replied %}
+                    <form action="/reply-comment-single" method="POST" class="flex items-center gap-1.5">
+                      <input type="hidden" name="comment_id" value="{{ c.id }}">
+                      <input type="hidden" name="author" value="{{ c.author }}">
+                      <input type="hidden" name="comment_text" value="{{ c.text }}">
+                      <button type="submit" class="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow transition flex items-center gap-1">
+                        <span>⚡</span> AI Reply Now
+                      </button>
+                    </form>
+                  {% else %}
+                    <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20">
+                      ✓ Handled
+                    </span>
+                  {% endif %}
+                </div>
+
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="p-6 rounded-2xl bg-slate-900/40 border border-dashed border-slate-800 text-center space-y-1">
+              <p class="text-xs text-slate-300 font-semibold">No comments received in the last 24 hours.</p>
+              <p class="text-[11px] text-slate-500">புதிய கமெண்ட்டுகள் வந்தவுடன் பாட் உடனுக்குடன் இங்கு காட்டி தானாக பதில் அளிக்கும்!</p>
+            </div>
+          {% endif %}
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- VIEW 3: MEDIA LIBRARY & ON-DEMAND CREATOR -->
+    <div id="viewContainer-library" class="view-section space-y-6">
+      
+      <div id="manualPostSection" class="space-y-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-white/[0.06] pb-3">
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+              <span>🎬</span> Channel Media Library ({{ total_uploads_count }} loaded)
+            </h2>
+            <p class="text-xs text-slate-400">Pick any live stream or video below to snip a 30s Short instantly or schedule it!</p>
+          </div>
+
+          <div class="flex items-center gap-2 w-full sm:w-auto">
+            <form action="/boost-all-seo" method="POST">
+              <button type="submit" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl shadow-lg transition flex items-center gap-1.5">
+                <span>✨</span> Update metadata for all videos
+              </button>
+            </form>
+
+            <div class="relative w-full sm:w-64">
+              <input type="text" id="videoSearchInput" oninput="filterVideos(this.value)" placeholder="🔍 Search loaded videos..."
+                     class="w-full px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 focus:outline-none focus:border-rose-500 transition">
+            </div>
+          </div>
+        </div>
+
+        <!-- A. LIVE STREAMS CAROUSEL -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span class="inline-block h-2.5 w-2.5 rounded-full bg-red-500 animate-pulse"></span>
+              <span>🔴 Live Streams Archive</span>
+              <span class="text-xs font-mono text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                {{ categorized.live|length }} Streams
+              </span>
+            </h3>
+            <div class="flex items-center gap-2">
+              <button onclick="scrollCarousel('liveCarousel', -320)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">◀</button>
+              <button onclick="scrollCarousel('liveCarousel', 320)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">▶</button>
+            </div>
+          </div>
+
+          <div id="liveCarousel" class="flex gap-4 overflow-x-auto custom-scroll pb-3 pt-1 smooth-scroll">
+            {% for vid in categorized.live %}
+              <div class="video-card glass-card flex-shrink-0 w-72 rounded-2xl overflow-hidden border border-white/[0.06] flex flex-col justify-between" data-title="{{ vid.title|lower }}">
+                <div>
+                  <div class="relative aspect-video bg-slate-900">
+                    <img src="{{ vid.thumbnail }}" class="w-full h-full object-cover" loading="lazy">
+                    <span class="absolute top-2 left-2 bg-red-600 text-white text-[10px] font-mono px-2 py-0.5 rounded font-bold">{{ 'LIVE' if vid.is_live else 'RECORDING' }}</span>
+                    {% if vid.duration %}
+                      <span class="absolute bottom-2 left-2 bg-black/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">{{ vid.duration }}</span>
+                    {% endif %}
+                    <span class="absolute bottom-2 right-2 bg-black/80 text-slate-300 text-[10px] font-mono px-2 py-0.5 rounded">{{ (vid.privacy or "UNKNOWN").upper() }}</span>
+                  </div>
+                  <div class="p-3">
+                    <h4 class="font-bold text-xs text-slate-200 line-clamp-2 leading-snug" title="{{ vid.title }}">{{ vid.title }}</h4>
+                    <div class="flex items-center gap-3 mt-1.5 text-[11px] font-mono text-slate-400">
+                      <span class="text-emerald-400">👁️ {{ vid.views }}</span>
+                      <span class="text-rose-400">❤️ {{ vid.likes }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <form action="/boost-video-seo" method="POST" class="p-3 pt-0">
+                  <input type="hidden" name="video_id" value="{{ vid.id }}">
+                  <button type="submit" class="w-full bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 font-bold text-[10px] py-1 rounded-lg border border-indigo-500/30 flex items-center justify-center gap-1 transition">
+                    <span>✨</span> Update description &amp; tags
+                  </button>
+                </form>
+
+                <div class="p-3 pt-0">
+                  <form action="/create-custom-short" method="POST" class="space-y-1.5" onsubmit="event.preventDefault(); triggerInstantShort(this, event.submitter);">
+                    <input type="hidden" name="video_id" value="{{ vid.id }}">
+                    <input type="hidden" name="video_title" value="{{ vid.title }}">
+                    <div class="grid grid-cols-2 gap-1.5">
+                      <button type="submit" {% if vid.is_live %}disabled title="Wait for this stream to finish before clipping"{% endif %} name="action" value="instant" class="bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 text-white font-bold text-[10px] py-1.5 rounded-lg transition shadow">
+                        ⚡ Instant Short
+                      </button>
+                      <div class="flex items-center gap-1">
+                        <input type="time" name="custom_time" value="18:00" class="w-full px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-[10px] font-mono text-rose-300">
+                        <button type="submit" {% if vid.is_live %}disabled{% endif %} name="action" value="schedule" title="Schedule a Short from a completed recording" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold">
+                          ⏰
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            {% else %}
+              <div class="p-6 text-xs text-slate-500 font-mono">No live streams found in channel history.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- B. LONG VIDEOS CAROUSEL -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>🎬</span> Long-Form Videos
+              <span class="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                {{ categorized.videos|length }} Videos
+              </span>
+            </h3>
+            <div class="flex items-center gap-2">
+              <button onclick="scrollCarousel('videosCarousel', -320)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">◀</button>
+              <button onclick="scrollCarousel('videosCarousel', 320)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">▶</button>
+            </div>
+          </div>
+
+          <div id="videosCarousel" class="flex gap-4 overflow-x-auto custom-scroll pb-3 pt-1 smooth-scroll">
+            {% for vid in categorized.videos %}
+              <div class="video-card glass-card flex-shrink-0 w-72 rounded-2xl overflow-hidden border border-white/[0.06] flex flex-col justify-between" data-title="{{ vid.title|lower }}">
+                <div>
+                  <div class="relative aspect-video bg-slate-900">
+                    <img src="{{ vid.thumbnail }}" class="w-full h-full object-cover" loading="lazy">
+                    <span class="absolute top-2 left-2 bg-indigo-600 text-white text-[10px] font-mono px-2 py-0.5 rounded font-bold">VIDEO</span>
+                    {% if vid.duration %}
+                      <span class="absolute bottom-2 left-2 bg-black/80 text-white text-[10px] font-mono px-1.5 py-0.5 rounded">{{ vid.duration }}</span>
+                    {% endif %}
+                    <span class="absolute bottom-2 right-2 bg-black/80 text-slate-300 text-[10px] font-mono px-2 py-0.5 rounded">{{ (vid.privacy or "UNKNOWN").upper() }}</span>
+                  </div>
+                  <div class="p-3">
+                    <h4 class="font-bold text-xs text-slate-200 line-clamp-2 leading-snug" title="{{ vid.title }}">{{ vid.title }}</h4>
+                    <div class="flex items-center gap-3 mt-1.5 text-[11px] font-mono text-slate-400">
+                      <span class="text-emerald-400">👁️ {{ vid.views }}</span>
+                      <span class="text-rose-400">❤️ {{ vid.likes }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <form action="/boost-video-seo" method="POST" class="p-3 pt-0">
+                  <input type="hidden" name="video_id" value="{{ vid.id }}">
+                  <button type="submit" class="w-full bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 font-bold text-[10px] py-1 rounded-lg border border-indigo-500/30 flex items-center justify-center gap-1 transition">
+                    <span>✨</span> Update description &amp; tags
+                  </button>
+                </form>
+
+                <div class="p-3 pt-0">
+                  <form action="/create-custom-short" method="POST" class="space-y-1.5" onsubmit="event.preventDefault(); triggerInstantShort(this, event.submitter);">
+                    <input type="hidden" name="video_id" value="{{ vid.id }}">
+                    <input type="hidden" name="video_title" value="{{ vid.title }}">
+                    <div class="grid grid-cols-2 gap-1.5">
+                      <button type="submit" {% if vid.is_live %}disabled title="Wait for this stream to finish before clipping"{% endif %} name="action" value="instant" class="bg-gradient-to-r from-rose-600 to-indigo-600 hover:from-rose-500 text-white font-bold text-[10px] py-1.5 rounded-lg transition shadow">
+                        ⚡ Instant Short
+                      </button>
+                      <div class="flex items-center gap-1">
+                        <input type="time" name="custom_time" value="18:00" class="w-full px-1.5 py-1 rounded-lg bg-slate-950 border border-slate-700 text-[10px] font-mono text-rose-300">
+                        <button type="submit" {% if vid.is_live %}disabled{% endif %} name="action" value="schedule" title="Schedule a Short from a completed recording" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded-lg text-[10px] font-bold">
+                          ⏰
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            {% else %}
+              <div class="p-6 text-xs text-slate-500 font-mono">No long videos found.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+        <!-- C. SHORTS CAROUSEL -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>📱</span> Published Shorts Feed
+              <span class="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                {{ categorized.shorts|length }} Short candidates
+              </span>
+            </h3>
+            <div class="flex items-center gap-2">
+              <button onclick="scrollCarousel('shortsCarousel', -260)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">◀</button>
+              <button onclick="scrollCarousel('shortsCarousel', 260)" class="h-7 w-7 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center justify-center font-bold">▶</button>
+            </div>
+          </div>
+
+          <div id="shortsCarousel" class="flex gap-4 overflow-x-auto custom-scroll pb-3 pt-1 smooth-scroll">
+            {% for vid in categorized.shorts %}
+              <div class="video-card glass-card flex-shrink-0 w-48 rounded-2xl overflow-hidden border border-white/[0.06]" data-title="{{ vid.title|lower }}">
+                <div class="relative aspect-[9/16] bg-slate-900">
+                  <img src="{{ vid.thumbnail }}" class="w-full h-full object-cover" loading="lazy">
+                  <span class="absolute top-2 left-2 bg-rose-600 text-white text-[10px] font-mono px-2 py-0.5 rounded font-bold">#SHORTS</span>
+                  <span class="absolute bottom-2 right-2 bg-black/80 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded">👁️ {{ vid.views }}</span>
+                </div>
+                <div class="p-2.5">
+                  <h4 class="font-bold text-[11px] text-slate-200 line-clamp-2 leading-tight" title="{{ vid.title }}">{{ vid.title }}</h4>
+                </div>
+              </div>
+            {% else %}
+              <div class="p-6 text-xs text-slate-500 font-mono">No Short candidates loaded.</div>
+            {% endfor %}
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- VIEW 4: SCHEDULER & 1-HOUR DRAFTS HUB -->
+    <div id="viewContainer-scheduler" class="view-section space-y-6">
+      
+      <!-- 1-Hour Early Draft Preview & Instant Publish Panel -->
+      <div class="glass-card p-6 sm:p-7 rounded-3xl border border-amber-500/30 bg-gradient-to-r from-amber-950/20 via-slate-900 to-rose-950/20 space-y-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-white/[0.06] pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-lg">⏱️</span>
+              <span class="text-xs font-mono font-bold uppercase tracking-wider text-amber-400">
+                1-Hour Early Pre-Stage Draft Preview
+              </span>
+            </div>
+            <h2 class="text-xl font-black text-white mt-0.5">Ready-to-Publish Shorts Drafts</h2>
+            <p class="text-xs text-slate-400">
+              செட் செய்த நேரத்திற்கு 1 மணி நேரத்திற்கு முன்பே கட் செய்யப்பட்டு Title &amp; Tags-உடன் தயாராக வைக்கப்படும். நீங்கள் இப்போதே வெளியிடலாம் அல்லது அமைத்த நேரத்தில் தானாகவே பப்ளிஷ் ஆகும்!
+            </p>
+          </div>
+
+          <form action="/prestage-draft-now" method="POST" onsubmit="event.preventDefault(); triggerPrestageDraft();">
+            <button type="submit" class="bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-amber-600/20 transition flex items-center gap-2">
+              <span>⚡</span> Generate Draft Preview Now
+            </button>
+          </form>
+        </div>
+
+        {% if drafts %}
+          <div class="space-y-3 pt-2">
+            {% for draft in drafts %}
+              <div class="p-4 rounded-2xl bg-slate-900/90 border border-amber-500/30 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div class="flex items-center gap-4 max-w-2xl">
+                  <div class="relative w-28 h-20 rounded-xl overflow-hidden bg-slate-950 flex-shrink-0 border border-amber-500/20 group">
+                    <img src="https://i.ytimg.com/vi/{{ draft.youtube_id }}/mqdefault.jpg" class="w-full h-full object-cover">
+                    <a href="https://www.youtube.com/watch?v={{ draft.youtube_id }}" target="_blank" class="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center transition">
+                      <span class="h-7 w-7 rounded-full bg-amber-500 text-black flex items-center justify-center text-xs font-bold pl-0.5 shadow">▶</span>
+                    </a>
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2.5">
+                      <span class="bg-amber-500/20 text-amber-300 font-mono text-[10px] font-bold px-2.5 py-0.5 rounded-md border border-amber-500/30">
+                        ⏰ Scheduled: {{ draft.publish_at or draft.slot_time }}
+                      </span>
+                      <span class="text-[11px] text-slate-400 font-mono">Generated at {{ draft.created_at }}</span>
+                    </div>
+                    <h4 class="font-bold text-sm text-white line-clamp-1">{{ draft.title }}</h4>
+                    <p class="text-xs text-slate-400 line-clamp-1">{{ draft.description }}</p>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-2.5 flex-shrink-0">
+                  <a href="https://www.youtube.com/watch?v={{ draft.youtube_id }}" target="_blank" class="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 transition flex items-center gap-1.5 shadow">
+                    <span>👁️</span> Preview
+                  </a>
+                  <form action="/publish-draft-now" method="POST">
+                    <input type="hidden" name="video_id" value="{{ draft.youtube_id }}">
+                    <button type="submit" class="bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/30 transition flex items-center gap-2">
+                      <span>🚀</span> Publish Now
+                    </button>
+                  </form>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="p-6 rounded-2xl bg-slate-900/40 border border-dashed border-slate-800 text-center space-y-1">
+            <p class="text-xs text-slate-300 font-semibold">No drafts currently pending.</p>
+            <p class="text-[11px] text-slate-500">Scheduled நேரத்திற்கு 1 மணி நேரத்திற்கு முன்பே பாட் தானாகவே டிராப்ட்டை இங்கு கொண்டு வந்து நிறுத்தும்!</p>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Live Active Schedule Queue -->
+      <div class="glass-card p-6 rounded-3xl border border-emerald-500/30 relative">
+        <div class="flex justify-between items-center border-b border-white/[0.06] pb-3">
+          <div>
+            <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">
+              {{ 'Daily automation enabled' if settings.auto_stream_select and automation_running and yt_connected and ai_configured else 'Daily automation unavailable or off' }}
+            </span>
+            <h3 class="text-base font-bold text-white mt-0.5">Automated Daily Upload Timetable</h3>
+          </div>
+          <span class="text-xs font-mono text-slate-400">Stream: {{ latest_stream_title[:28] }}...</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
+          {% for slot in scheduled_slots %}
+            <div class="p-3.5 rounded-xl bg-slate-900/80 border border-emerald-500/20 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold font-mono text-xs">
+                  #{{ loop.index }}
+                </div>
+                <div>
+                  <p class="text-[10px] text-slate-400 uppercase font-mono tracking-wider">Upload Clock ({{ timezone }})</p>
+                  <h4 class="text-sm font-extrabold text-white font-mono">{{ slot }}</h4>
+                </div>
+              </div>
+              <span class="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                Configured
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- Toggles & Interactive Clock Scheduler Form -->
+      <form action="/update-settings" method="POST" class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          <div class="glass-card p-6 rounded-3xl space-y-4">
+            <div class="flex items-center gap-2 border-b border-white/[0.06] pb-3">
+              <span class="text-lg">🔘</span>
+              <h3 class="text-sm font-bold text-white">Bot Feature Toggles (ON / OFF)</h3>
+            </div>
+
+            <div class="space-y-3.5 text-xs">
+              <label class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-white/[0.05] cursor-pointer hover:border-slate-700 transition">
+                <div>
+                  <span class="font-bold text-slate-200 block">💬 Video Comments Auto-Reply</span>
+                  <span class="text-[11px] text-slate-400">புதிய கமெண்ட்டுகளுக்கு AI தானாக பதில் தரும்</span>
+                </div>
+                <input type="checkbox" name="comments_reply" value="true" {% if settings.comments_reply %}checked{% endif %} class="w-5 h-5 accent-rose-600 rounded">
+              </label>
+
+              <label class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-white/[0.05] cursor-pointer hover:border-slate-700 transition">
+                <div>
+                  <span class="font-bold text-slate-200 block">🔴 Live Chat Auto-Responder</span>
+                  <span class="text-[11px] text-slate-400">லைவ் ஸ்ட்ரீம் சாட்டில் உடனுக்குடன் பார்வையாளர்களுக்கு பதில் தரும்</span>
+                </div>
+                <input type="checkbox" name="live_chat_reply" value="true" {% if settings.live_chat_reply %}checked{% endif %} class="w-5 h-5 accent-rose-600 rounded">
+              </label>
+
+              <label class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-white/[0.05] cursor-pointer hover:border-slate-700 transition">
+                <div>
+                  <span class="font-bold text-slate-200 block">🌐 Auto-Public: Shorts, Videos &amp; Live</span>
+                  <span class="text-[11px] text-slate-400">Private / unlisted uploads and livestreams become Public. Future scheduled uploads wait for their selected time.</span>
+                </div>
+                <input type="checkbox" name="privacy_guard" value="true" {% if settings.privacy_guard %}checked{% endif %} class="w-5 h-5 accent-rose-600 rounded">
+              </label>
+
+              <label class="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-white/[0.05] cursor-pointer hover:border-slate-700 transition">
+                <div>
+                  <span class="font-bold text-slate-200 block">🤖 Automatic Shorts Creation</span>
+                  <span class="text-[11px] text-slate-400">Use the latest completed recording at configured times</span>
+                </div>
+                <input type="checkbox" name="auto_stream_select" value="true" {% if settings.auto_stream_select %}checked{% endif %} class="w-5 h-5 accent-rose-600 rounded">
+              </label>
+            </div>
+          </div>
+
+          <div class="glass-card p-6 rounded-3xl space-y-4 flex flex-col justify-between">
+            <div class="space-y-4">
+              <div class="flex items-center justify-between border-b border-white/[0.06] pb-3">
+                <div class="flex items-center gap-2">
+                  <span class="text-lg">⏰</span>
+                  <h3 class="text-sm font-bold text-white">Daily Shorts &amp; Clock Timing Settings</h3>
+                </div>
+                <span class="text-[11px] text-rose-400 font-mono font-bold bg-rose-500/10 px-2.5 py-0.5 rounded-full border border-rose-500/20">
+                  Interactive Clock
+                </span>
+              </div>
+
+              <div class="space-y-3.5 text-xs">
+                <div>
+                  <label class="block text-slate-300 font-semibold mb-1">ஒரு நாளைக்கு எத்தனை Shorts பதிவிட வேண்டும்?</label>
+                  <select id="shortsCountSelect" name="daily_shorts_count" onchange="renderClockPickers()"
+                          class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-xs font-mono text-slate-200 focus:outline-none focus:border-rose-500">
+                    <option value="1" {% if settings.daily_shorts_count == 1 %}selected{% endif %}>1 Short Per Day</option>
+                    <option value="2" {% if settings.daily_shorts_count == 2 %}selected{% endif %}>2 Shorts Per Day</option>
+                    <option value="3" {% if settings.daily_shorts_count == 3 %}selected{% endif %}>3 Shorts Per Day</option>
+                    <option value="4" {% if settings.daily_shorts_count == 4 %}selected{% endif %}>4 Shorts Per Day</option>
+                    <option value="5" {% if settings.daily_shorts_count == 5 %}selected{% endif %}>5 Shorts Per Day</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="block text-slate-300 font-semibold mb-1.5">ஒவ்வொரு Short-க்கான நேரத்தை தேர்வு செய்யவும்:</label>
+                  <div id="clockPickersContainer" class="space-y-2.5"></div>
+                </div>
+
+                <div class="pt-1">
+                  <label class="block text-slate-300 font-semibold mb-1">அப்லோட் முறை (Posting Mode)</label>
+                  <div class="grid grid-cols-2 gap-3">
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer">
+                      <input type="radio" name="post_mode" value="scheduled" {% if settings.post_mode == 'scheduled' %}checked{% endif %} class="accent-rose-500">
+                      <span class="text-[11px] font-medium text-slate-200">Schedule at Times</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer">
+                      <input type="radio" name="post_mode" value="immediate" {% if settings.post_mode == 'immediate' %}checked{% endif %} class="accent-rose-500">
+                      <span class="text-[11px] font-medium text-slate-200">Publish at slot (no early draft)</span>
+                    </label>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-xs shadow-lg shadow-emerald-600/20 transition mt-3">
+              💾 Save Timing Settings &amp; Apply
+            </button>
+          </div>
+
+        </div>
+      </form>
+
+    </div>
+
+    <div id="viewContainer-settings" class="view-section space-y-6 hidden">
+      <div class="glass-card p-6 rounded-3xl space-y-3">
+        <h2 class="text-xl font-bold">Connections &amp; API Settings</h2>
+        <p class="text-sm text-slate-400">Connect your channel and test your Gemini key here. Saved keys are never displayed.</p>
+        <p id="connectionMessage" role="status" aria-live="polite" class="text-sm text-emerald-300 break-words"></p>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section class="glass-card p-6 rounded-3xl space-y-4">
+          <h3 class="font-bold text-lg">YouTube account</h3>
+          <p id="youtubeConnectionLabel" class="text-sm text-slate-300">Checking connection…</p>
+          <div class="flex flex-wrap gap-3">
+            <a id="youtubeConnectButton" href="/auth/youtube" class="rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold">Connect YouTube</a>
+            <form action="/api/settings/disconnect-youtube" method="post" data-connection-form>
+              <button id="youtubeDisconnectButton" type="submit" class="hidden rounded-xl border border-slate-600 px-4 py-3 text-sm">Disconnect YouTube</button>
+            </form>
+          </div>
+          <p class="text-xs text-slate-400">Disconnect stops this bot from using your channel. Sign out in the header only logs you out of this dashboard.</p>
+        </section>
+        <section class="glass-card p-6 rounded-3xl space-y-4">
+          <h3 class="font-bold text-lg">Gemini AI</h3>
+          <p id="geminiConnectionLabel" class="text-sm text-slate-300"></p>
+          <form action="/api/settings/gemini" method="post" data-connection-form class="space-y-4">
+            <label class="block text-sm">Gemini API key<input name="api_key" type="password" autocomplete="new-password" class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3" placeholder="Paste key; blank keeps the saved key"></label>
+            <button id="loadGeminiModels" type="button" onclick="refreshModelList()" class="bg-slate-700 px-4 py-2 rounded-xl text-sm">Load / Refresh Models</button>
+            <label class="block text-sm">Gemini model<select id="geminiModelInput" name="model" required disabled class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3"><option value="">Load models to select</option></select></label>
+            <p id="geminiModelMessage" role="status" class="text-xs text-slate-400"></p>
+            <button id="saveGeminiSettings" disabled class="bg-emerald-600 disabled:opacity-50 px-4 py-3 rounded-xl font-bold text-sm" type="submit">Test &amp; Save</button>
+            <p class="text-xs text-slate-400">Paste your key, load models and select one. A small AI request checks compatibility before saving. Changes apply immediately; no code changes or restart needed.</p>
+          </form>
+        </section>
+      </div>
+    </div>
+
+    <!-- FOOTER WITH ROOKDEVSTUDIO BRANDING -->
+    <footer class="pt-8 pb-4 border-t border-white/[0.06] text-center space-y-2">
+      <div class="flex items-center justify-center gap-2 text-xs text-slate-400 font-mono">
+        <span class="inline-block h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>YouTube AI Studio — automation runs while this app is running</span>
+      </div>
+      <p class="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-rose-400 via-indigo-300 to-emerald-400 bg-clip-text text-transparent">
+        Bot created by <a href="https://rookdevstudio.site" target="_blank" rel="noopener noreferrer" class="bg-gradient-to-r from-rose-400 via-indigo-300 to-emerald-400 bg-clip-text text-transparent underline hover:opacity-80 transition inline-block">rookdevstudio</a>
+      </p>
+      <p class="text-[11px] text-slate-600 font-mono">
+        Powered by configured Google Gemini model &bull; YouTube Data API v3 &bull; FFmpeg
+      </p>
+    </footer>
+
+  </main>
+
+  <script>
+    const savedTimes = {{ settings.posting_times | tojson }}.split(",").map(t => t.trim());
+    const defaultTimes = ["06:00", "11:00", "14:00", "18:30", "22:00"];
+    let pollInterval = null;
+    let chatPoll = null;
+
+    function switchMainTab(tabName) {
+      document.querySelectorAll('.main-tab-nav').forEach(btn => {
+        btn.className = "main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0";
+      });
+      const activeBtn = document.getElementById('tabNav-' + tabName);
+      if (activeBtn) {
+        activeBtn.className = "main-tab-nav bg-rose-600 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 flex-shrink-0 shadow";
+      }
+
+      if (tabName === 'all') {
+        document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('hidden'));
+      } else {
+        document.querySelectorAll('.view-section').forEach(sec => sec.classList.add('hidden'));
+        const target = document.getElementById('viewContainer-' + tabName);
+        if (target) target.classList.remove('hidden');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function renderClockPickers() {
+      document.querySelectorAll("input[name=time_slot]").forEach((el, index) => { savedTimes[index] = el.value; });
+      const count = parseInt(document.getElementById("shortsCountSelect").value);
+      const container = document.getElementById("clockPickersContainer");
+      container.innerHTML = "";
+
+      for (let i = 0; i < count; i++) {
+        const candidate = savedTimes[i] || defaultTimes[i] || "12:00";
+        const val = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(candidate) ? candidate : "12:00";
+        const div = document.createElement("div");
+        div.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-rose-500/40 transition";
+        div.innerHTML = `
+          <div class="flex items-center gap-2.5">
+            <span class="h-6 w-6 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center justify-center font-bold text-[10px] font-mono">
+              #${i + 1}
+            </span>
+            <span class="text-xs font-semibold text-slate-200">Shorts #${i + 1} Upload Time:</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="time" name="time_slot" value="${val}" required
+                   class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-rose-300 focus:outline-none focus:border-rose-500 cursor-pointer">
+          </div>
+        `;
+        container.appendChild(div);
+      }
+    }
+
+    function scrollCarousel(id, offset) {
+      const el = document.getElementById(id);
+      if (el) el.scrollBy({ left: offset, behavior: 'smooth' });
+    }
+
+    function filterVideos(q) {
+      const query = q.trim().toLowerCase();
+      const cards = document.querySelectorAll('.video-card');
+      cards.forEach(card => {
+        const title = card.getAttribute('data-title') || '';
+        if (!query || title.includes(query)) {
+          card.style.display = '';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function switchCommentTab(tabId) {
+      document.querySelectorAll('.comment-tab-btn').forEach(btn => {
+        btn.className = "comment-tab-btn bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-3.5 py-1.5 rounded-xl border border-slate-800 transition flex-shrink-0";
+      });
+      const activeBtn = document.getElementById('btn-' + tabId);
+      if (activeBtn) {
+        activeBtn.className = "comment-tab-btn bg-rose-600 text-white font-bold text-xs px-3.5 py-1.5 rounded-xl transition flex-shrink-0";
+      }
+
+      const cards = document.querySelectorAll('.comment-item-card');
+      cards.forEach(card => {
+        const cat = card.getAttribute('data-cat');
+        if (tabId === 'tab-all' || cat === tabId) {
+          card.style.display = '';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function triggerInstantShort(form, submitter) {
+      const formData = new FormData(form);
+      if (submitter && submitter.name) formData.set(submitter.name, submitter.value);
+      const vTitle = formData.get("video_title") || "Selected Video";
+      openCreationModal(vTitle);
+
+      fetch("/create-custom-short", {
+        method: "POST",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" },
+        body: formData
+      }).then(readResponse).then(() => startJobPolling())
+        .catch(showJobError);
+    }
+
+    function triggerPrestageDraft() {
+      openCreationModal("1-Hour Early Pre-Stage Draft Preview");
+      fetch("/prestage-draft-now", {
+        method: "POST",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+      }).then(readResponse).then(() => startJobPolling())
+        .catch(showJobError);
+    }
+
+    function triggerTopInstantShort() {
+      openCreationModal("Instant Short from Latest Upload");
+      fetch("/create-instant-short-latest", {
+        method: "POST",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+      }).then(readResponse).then(() => startJobPolling())
+        .catch(showJobError);
+    }
+
+    function openCreationModal(title) {
+      document.getElementById("modalVideoTitle").innerText = title;
+      document.getElementById("modalProgressBar").style.width = "0%";
+      document.getElementById("modalProgressPercent").innerText = "0%";
+      document.getElementById("modalProgressText").innerText = "Initializing creation pipeline...";
+      document.getElementById("modalStatusLog").innerText = "Connecting to yt-dlp & FFmpeg...";
+      document.getElementById("modalSuccessBox").classList.add("hidden");
+      document.getElementById("modalErrorBox").classList.add("hidden");
+      document.getElementById("modalWatchShortBtn").classList.add("hidden");
+      document.getElementById("modalPlaylistBtn").classList.add("hidden");
+      resetStepBadges();
+      document.getElementById("creationModal").classList.remove("hidden");
+    }
+
+    function dismissModal() {
+      document.getElementById("creationModal").classList.add("hidden");
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    }
+
+    function resetStepBadges() {
+      for (let i = 1; i <= 5; i++) {
+        const item = document.getElementById("stepItem" + i);
+        const icon = document.getElementById("stepIcon" + i);
+        const badge = document.getElementById("stepBadge" + i);
+        if (item && icon && badge) {
+          item.className = "flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition";
+          icon.className = "h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]";
+          badge.className = "text-[10px] text-slate-500";
+          badge.innerText = "Pending";
+        }
+      }
+    }
+
+    function updateStepUI(activeStep) {
+      for (let i = 1; i <= 5; i++) {
+        const item = document.getElementById("stepItem" + i);
+        const icon = document.getElementById("stepIcon" + i);
+        const badge = document.getElementById("stepBadge" + i);
+        if (!item || !icon || !badge) continue;
+
+        if (i < activeStep) {
+          item.className = "flex items-center gap-3 p-2.5 rounded-xl bg-emerald-950/40 border border-emerald-500/30 transition";
+          icon.className = "h-6 w-6 rounded-lg bg-emerald-500 text-black flex items-center justify-center font-bold text-[11px]";
+          badge.className = "text-[10px] text-emerald-400 font-bold";
+          badge.innerText = "✓ Done";
+        } else if (i === activeStep) {
+          item.className = "flex items-center gap-3 p-2.5 rounded-xl bg-rose-950/40 border border-rose-500/50 shadow transition";
+          icon.className = "h-6 w-6 rounded-lg bg-rose-500 text-white flex items-center justify-center font-bold text-[11px] animate-pulse";
+          badge.className = "text-[10px] text-rose-400 font-bold animate-pulse";
+          badge.innerText = "In Progress";
+        } else {
+          item.className = "flex items-center gap-3 p-2.5 rounded-xl bg-slate-900/60 border border-white/[0.05] transition";
+          icon.className = "h-6 w-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center font-bold text-[11px]";
+          badge.className = "text-[10px] text-slate-500";
+          badge.innerText = "Pending";
+        }
+      }
+    }
+
+    function startJobPolling() {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(() => {
+        fetch("/api/job-status")
+          .then(readResponse)
+          .then(job => {
+            if (!job) return;
+            document.getElementById("modalProgressBar").style.width = job.progress + "%";
+            document.getElementById("modalProgressPercent").innerText = job.progress + "%";
+            document.getElementById("modalProgressText").innerText = job.step_text;
+            document.getElementById("modalStatusLog").innerText = "Status: " + job.status + " | " + job.step_text;
+            updateStepUI(job.step_index);
+
+            if (job.status === "completed") {
+              clearInterval(pollInterval);
+              pollInterval = null;
+              updateStepUI(6);
+              if (job.short_url) {
+                document.getElementById("modalWatchShortBtn").href = job.short_url;
+                document.getElementById("modalWatchShortBtn").classList.remove("hidden");
+              }
+              if (job.playlist_url) {
+                document.getElementById("modalPlaylistBtn").href = job.playlist_url;
+                document.getElementById("modalPlaylistBtn").classList.remove("hidden");
+              }
+              document.getElementById("modalSuccessBox").classList.remove("hidden");
+            } else if (job.status === "error") {
+              clearInterval(pollInterval);
+              pollInterval = null;
+              document.getElementById("modalErrorText").innerText = job.error || "An unknown error occurred.";
+              document.getElementById("modalErrorBox").classList.remove("hidden");
+            }
+          })
+          .catch(showJobError);
+      }, 1000);
+    }
+
+    function openLiveChatModal() {
+      document.getElementById('liveChatModal').classList.remove('hidden');
+      refreshLiveChat();
+      if (!chatPoll) chatPoll = setInterval(refreshLiveChat, 6000);
+    }
+
+    function closeLiveChatModal() {
+      document.getElementById('liveChatModal').classList.add('hidden');
+      if (chatPoll) { clearInterval(chatPoll); chatPoll = null; }
+    }
+
+    async function readResponse(response) {
+      let data;
+      try { data = await response.json(); } catch { throw new Error('Server returned an invalid response. Sign in again if your session expired.'); }
+      if (!response.ok || data.status === 'error') throw new Error(data.error || data.detail || 'Request failed');
+      return data;
+    }
+    function showJobError(error) {
+      if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+      document.getElementById('modalErrorText').textContent = error.message || String(error);
+      document.getElementById('modalErrorBox').classList.remove('hidden');
+    }
+    function showActionError(error) {
+      const box = document.getElementById('actionError');
+      box.textContent = error.message || String(error);
+      box.classList.remove('hidden');
+      box.scrollIntoView({behavior: 'smooth'});
+    }
+    async function refreshLiveChat() {
+      try {
+        const data = await readResponse(await fetch('/api/live-chat-status'));
+        document.getElementById('modalViewersCount').textContent = data.viewers ?? 'Unavailable';
+        document.getElementById('modalLikesCount').textContent = data.likes ?? 'Unavailable';
+        document.getElementById('modalLiveTitle').textContent = data.error || data.title;
+        document.getElementById('modalLiveBadge').textContent = data.is_live ? (data.reply_enabled ? 'Auto reply enabled' : 'Auto reply off') : 'No active live chat';
+        const feed = document.getElementById('modalChatFeed');
+        feed.replaceChildren();
+        for (const message of data.messages || []) {
+          const row = document.createElement('div');
+          row.className = 'p-3 rounded-xl bg-slate-900 space-y-1';
+          for (const [text, style] of [[message.author + ' · ' + message.time, 'text-rose-300 font-bold'], [message.message, 'text-slate-200'], [message.reply, 'text-emerald-300']]) {
+            const line = document.createElement('p');
+            line.className = style;
+            line.textContent = text || '';
+            row.appendChild(line);
+          }
+          feed.appendChild(row);
+        }
+        if (!feed.childElementCount) feed.textContent = data.error || 'No confirmed chat replies in this session.';
+      } catch (error) {
+        document.getElementById('modalLiveTitle').textContent = error.message;
+      }
+    }
+    async function sendLiveChatMessage() {
+      const input = document.getElementById('liveMsgInput');
+      if (!input.value.trim()) return;
+      const form = new FormData();
+      form.append('message', input.value.trim());
+      input.disabled = true;
+      try {
+        await readResponse(await fetch('/api/send-live-chat', {method: 'POST', body: form}));
+        input.value = '';
+        await refreshLiveChat();
+      } catch (error) {
+        document.getElementById('modalLiveTitle').textContent = error.message;
+      } finally { input.disabled = false; }
+    }
+    let savedGeminiModel = '';
+    let modelListVersion = 0;
+    let modelListInitialized = false;
+    function invalidateModelList() {
+      modelListVersion++;
+      const select = document.getElementById('geminiModelInput');
+      select.replaceChildren(new Option('Load models to select', ''));
+      select.disabled = true;
+      document.getElementById('saveGeminiSettings').disabled = true;
+      document.getElementById('loadGeminiModels').disabled = false;
+      document.getElementById('geminiModelMessage').textContent = 'Load models for this API key before saving.';
+    }
+    document.querySelector('input[name=api_key]').addEventListener('input', invalidateModelList);
+    async function refreshModelList() {
+      const version = ++modelListVersion;
+      const select = document.getElementById('geminiModelInput');
+      const preferred = select.value || savedGeminiModel;
+      const button = document.getElementById('loadGeminiModels');
+      const message = document.getElementById('geminiModelMessage');
+      select.replaceChildren(new Option('Loading models…', ''));
+      select.disabled = true;
+      button.disabled = true;
+      document.getElementById('saveGeminiSettings').disabled = true;
+      message.textContent = 'Checking available Gemini text models…';
+      const data = new FormData();
+      data.set('api_key', document.querySelector('input[name=api_key]').value);
+      try {
+        const response = await readResponse(await fetch('/api/settings/gemini/models', {method:'POST', body:data}));
+        if (version !== modelListVersion) return;
+        select.replaceChildren(...response.models.map(model => new Option(model.name + ' (' + model.id + ')', model.id)));
+        if (response.models.some(model => model.id === preferred)) select.value = preferred;
+        select.disabled = response.models.length === 0;
+        document.getElementById('saveGeminiSettings').disabled = select.disabled;
+        message.textContent = response.models.length + ' text models available. Test & Save verifies the selected model with this bot.';
+      } catch (error) {
+        if (version !== modelListVersion) return;
+        select.replaceChildren(new Option('Could not load models', ''));
+        message.textContent = error.message;
+      } finally { if (version === modelListVersion) button.disabled = false; }
+    }
+    async function refreshConnections() {
+      try {
+        const status = await readResponse(await fetch('/api/settings/status'));
+        document.getElementById('youtubeConnectionLabel').textContent = status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.';
+        document.getElementById('youtubeConnectButton').textContent = status.youtube_connected ? 'Reconnect / Change channel' : 'Connect YouTube';
+        document.getElementById('youtubeDisconnectButton').classList.toggle('hidden', !status.youtube_connected);
+        document.getElementById('geminiConnectionLabel').textContent = status.ai_configured ? 'API key saved. Test it or paste a replacement below.' : 'No Gemini key saved yet.';
+        savedGeminiModel = status.model;
+        if (!modelListInitialized && status.ai_configured && !document.querySelector('input[name=api_key]').value) {
+          modelListInitialized = true;
+          await refreshModelList();
+        }
+      } catch (error) { document.getElementById('connectionMessage').textContent = error.message; }
+    }
+    document.querySelectorAll('[data-connection-form]').forEach(form => form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      const body = new FormData(form);
+      const isGemini = form.action.endsWith('/gemini');
+      const geminiControls = isGemini ? [...form.querySelectorAll('input, select, button')] : [];
+      geminiControls.forEach(control => control.disabled = true);
+      button.disabled = true;
+      const message = document.getElementById('connectionMessage');
+      message.textContent = 'Checking and saving…';
+      try {
+        const data = await readResponse(await fetch(form.action, {method:'POST', body}));
+        message.textContent = data.message;
+        form.querySelectorAll('input[type=password]').forEach(input => input.value = '');
+        if (form.action.endsWith('/disconnect-youtube')) {
+          window.location.hash = 'settings';
+          window.location.reload();
+          return;
+        }
+        await refreshConnections();
+      } catch (error) { message.textContent = error.message; }
+      finally {
+        geminiControls.forEach(control => control.disabled = false);
+        button.disabled = false;
+      }
+    }));
+    document.addEventListener('submit', async event => {
+      const form = event.target;
+      if (event.defaultPrevented || form.method.toLowerCase() !== 'post') return;
+      event.preventDefault();
+      const button = event.submitter;
+      if (button) button.disabled = true;
+      try {
+        const response = await fetch(form.action, {method: 'POST', body: new FormData(form)});
+        if (!response.ok) await readResponse(response);
+        window.location.assign(response.url || '/');
+      } catch (error) {
+        showActionError(error);
+        if (button) button.disabled = false;
+      }
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+      renderClockPickers();
+      switchMainTab(location.hash === '#settings' ? 'settings' : location.hash === '#commentsHubSection' ? 'comments' : 'overview');
+      refreshConnections();
+    });
+  </script>
+</body>
+</html>
+
