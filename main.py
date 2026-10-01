@@ -4,13 +4,14 @@ import json
 import os
 import re
 import secrets
+import tempfile
 import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from urllib.parse import urlparse
-from fastapi import FastAPI, Request, Form, BackgroundTasks
+from fastapi import FastAPI, Request, Form, File, UploadFile, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -20,6 +21,8 @@ from youtube_service import YouTubeService, SCOPES
 from ai_service import AIService
 from settings_store import update_environment
 from runtime_config import load_runtime_environment, settings_environment_path
+from media_tools import probe_video
+from youtube_service import parse_iso_duration
 
 BASE_DIR = Path(__file__).parent
 load_runtime_environment(BASE_DIR)
@@ -34,6 +37,8 @@ active_job = dict(active=False,job_id='',video_title='',status='idle',progress=0
 signer = URLSafeTimedSerializer(os.getenv('SESSION_SECRET') or secrets.token_urlsafe(48))
 oauth_flows = {}
 login_attempts = {}
+MAX_SOURCE_BYTES = 1024 * 1024 * 1024
+MAX_SOURCE_STORAGE_BYTES = 2 * MAX_SOURCE_BYTES
 
 
 @contextmanager
@@ -123,6 +128,13 @@ async def protect_routes(request,call_next):
         expected = os.getenv('PUBLIC_BASE_URL') or str(request.base_url).rstrip('/')
         if origin and origin.rstrip('/') != expected.rstrip('/'):
             return JSONResponse({'error':'Request origin is not allowed.'},status_code=403)
+    if request.url.path == '/api/settings/source-recording':
+        try:
+            content_length = int(request.headers.get('content-length','0'))
+        except ValueError:
+            return JSONResponse({'error':'Invalid upload length.'},status_code=400)
+        if content_length > MAX_SOURCE_BYTES + 1024 * 1024:
+            return JSONResponse({'error':'Recording exceeds the 1 GB upload limit.'},status_code=413)
     response = await call_next(request)
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -143,8 +155,11 @@ async def validation_error(request,exc):
 
 
 @app.get('/healthz')
-def health():
-    return {'status':'ok'}
+def health(details:bool=False):
+    result = {'status':'ok'}
+    if details:
+        result['release'] = '2026.10.01-source-recordings'
+    return result
 
 
 @app.get('/favicon.ico',include_in_schema=False)
@@ -156,7 +171,56 @@ def favicon():
 def connection_status():
     return dict(youtube_connected=bool(yt_service.youtube and yt_service.channel_id),
                 channel_name=yt_service.channel_name,ai_configured=bool(ai_service),
-                model=ai_service.model if ai_service else os.getenv('GEMINI_MODEL','gemini-3.5-flash'))
+                model=ai_service.model if ai_service else os.getenv('GEMINI_MODEL','gemini-3.5-flash'),
+                saved_source_ids=yt_service.saved_source_ids())
+
+
+@app.post('/api/settings/source-recording')
+def save_source_recording(video_id:str=Form(...), recording:UploadFile=File(...)):
+    try:
+        with configuration_change():
+            if not yt_service.youtube:
+                raise ValueError('Connect YouTube before uploading a source recording.')
+            destination = yt_service.source_recording_path(video_id)
+            source = yt_service._source(video_id)
+            expected = parse_iso_duration(source.get('contentDetails',{}).get('duration',''))
+            if expected < 30:
+                raise ValueError('Choose a completed video at least 30 seconds long.')
+            destination.parent.mkdir(parents=True,exist_ok=True)
+            root = Path(yt_service.base_dir)/'source_recordings'
+            used = sum(p.stat().st_size for p in root.rglob('*.mp4'))
+            previous = destination.stat().st_size if destination.exists() else 0
+            temporary = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=destination.parent,suffix='.mp4',delete=False) as file:
+                    temporary = Path(file.name)
+                    size = 0
+                    while chunk := recording.file.read(1024*1024):
+                        size += len(chunk)
+                        if size > MAX_SOURCE_BYTES:
+                            raise ValueError('Recording exceeds the 1 GB upload limit.')
+                        if used - previous + size > MAX_SOURCE_STORAGE_BYTES:
+                            raise ValueError('Saved recordings exceed the 2 GB storage limit. Remove an unused recording first.')
+                        file.write(chunk)
+                _, duration = probe_video(temporary)
+                if abs(duration - expected) > max(3,expected * .001):
+                    raise ValueError('Upload the full original recording for the selected video; its duration must match the channel video.')
+                os.replace(temporary,destination)
+            finally:
+                if temporary and temporary.exists():
+                    temporary.unlink()
+    finally:
+        recording.file.close()
+    add_log('Full source recording validated and saved for '+video_id+'.')
+    return {'status':'ok','message':'Full recording saved. Retry Short creation; this recording will be used automatically, including after a restart.'}
+
+
+@app.post('/api/settings/remove-source-recording')
+def remove_source_recording(video_id:str=Form(...)):
+    with configuration_change():
+        path = yt_service.source_recording_path(video_id)
+        path.unlink(missing_ok=True)
+    return {'status':'ok','message':'Saved source copy removed. Your YouTube video is unchanged.'}
 
 
 def settings_api_key(api_key):
@@ -297,6 +361,8 @@ def index(request:Request):
     return templates.TemplateResponse(request=request,name='index.html',context=dict(
         yt_connected=bool(yt_service.youtube and yt_service.channel_id),ai_configured=bool(ai_service),
         automation_running=scheduler.running,channel_id=yt_service.channel_id,channel_name=yt_service.channel_name,
+        ai_model=ai_service.model if ai_service else '',saved_source_ids=yt_service.saved_source_ids(),
+        source_videos=[v for category in ('videos','live') for v in categorized[category] if not v.get('is_live') and parse_iso_duration(v.get('duration'))>=30],
         analytics=analytics,categorized=categorized,total_uploads_count=len(combined),playlist_id=yt_service.cached_playlist_id or '',
         drafts=[d for d in yt_service.drafts if d.get('channel_id') in (None,yt_service.channel_id)],growth_plan=growth,
         settings=yt_service.settings,scheduled_slots=[s.strip() for s in yt_service.settings['posting_times'].split(',')][:yt_service.settings['daily_shorts_count']],
