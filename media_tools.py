@@ -9,6 +9,20 @@ import tempfile
 from pathlib import Path
 
 
+class SourceAccessError(RuntimeError):
+    """YouTube refused access; repeating format attempts cannot repair a login block."""
+
+
+def source_download_error(output):
+    lowered = (output or '').lower()
+    if any(message in lowered for message in ('confirm you’re not a bot', "confirm you're not a bot", 'sign in to confirm', 'private video', 'login required')):
+        raise SourceAccessError('YouTube blocked this server from downloading the recording. '
+                               'In Settings → Source recordings, select this video and upload its original full recording, '
+                               'then retry. The saved recording is used automatically for later Shorts. '
+                               'Reconnecting YouTube or changing the Gemini key does not fix this download block.')
+    return media_error(output)
+
+
 def get_ffmpeg_path():
     local = Path(__file__).parent / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
     return str(local) if local.exists() else shutil.which('ffmpeg') or 'ffmpeg'
@@ -34,7 +48,7 @@ def probe_video(path):
     ffmpeg = Path(get_ffmpeg_path())
     candidate = ffmpeg.with_name('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
     probe = str(candidate) if candidate.exists() else shutil.which('ffprobe') or str(candidate)
-    result = run_media([probe, '-v', 'error', '-show_streams', '-show_format', '-of', 'json', str(path)], 30)
+    result = run_media([probe, '-v', 'error', '-protocol_whitelist', 'file,pipe', '-show_streams', '-show_format', '-of', 'json', str(path)], 30)
     if result.returncode:
         raise RuntimeError('Video validation failed: ' + media_error(result.stderr))
     data = json.loads(result.stdout)
@@ -53,7 +67,7 @@ def validate_duration(path, expected):
 
 
 def trim_local(source, destination, offset, duration, ffmpeg):
-    command = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2', '-ss', str(offset), '-i', str(source),
+    command = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2', '-ss', str(offset), '-protocol_whitelist', 'file,pipe', '-i', str(source),
                '-t', str(duration), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c:v', 'libx264', '-threads', '2',
                '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(destination)]
     result = run_media(command, 600)
@@ -84,13 +98,15 @@ def download_clip_robustly(yt_url, offset_sec, duration_sec, out_raw, ffmpeg_bin
             try:
                 result = run_media(command, 360)
                 if result.returncode:
-                    raise RuntimeError(media_error(result.stderr))
+                    raise RuntimeError(source_download_error(result.stderr))
                 candidates = [p for p in stage.glob('source.*') if p.suffix in ('.mp4', '.mkv', '.webm')]
                 if not candidates:
                     raise RuntimeError('Downloader returned no completed video file.')
                 validate_duration(candidates[0], duration_sec)
                 shutil.copyfile(candidates[0], out_raw)
                 return True
+            except SourceAccessError:
+                raise
             except (RuntimeError, ValueError) as exc:
                 errors.append(str(exc))
                 log_fn(f'Segment attempt {attempt + 1} failed: {exc}')
@@ -102,7 +118,7 @@ def download_clip_robustly(yt_url, offset_sec, duration_sec, out_raw, ffmpeg_bin
         try:
             result = run_media(base + ['-f', formats[1], '--max-filesize', '1G', '-o', str(stage/'source.%(ext)s'), yt_url], 900)
             if result.returncode:
-                raise RuntimeError(media_error(result.stderr))
+                raise RuntimeError(source_download_error(result.stderr))
             candidates = [p for p in stage.glob('source.*') if p.suffix in ('.mp4', '.mkv', '.webm')]
             if not candidates:
                 raise RuntimeError('Source exceeds the download limit or no accessible video format was returned.')
@@ -111,6 +127,8 @@ def download_clip_robustly(yt_url, offset_sec, duration_sec, out_raw, ffmpeg_bin
                 raise RuntimeError('Requested segment extends beyond the available source recording.')
             trim_local(candidates[0], out_raw, offset_sec, duration_sec, ffmpeg_bin)
             return True
+        except SourceAccessError:
+            raise
         except (RuntimeError, ValueError) as exc:
             errors.append(str(exc))
     raise RuntimeError('Source download failed after segment and local-cut attempts: ' + errors[-1])
@@ -125,7 +143,7 @@ def convert_vertical_clip(raw, output, duration, log_fn=print):
     for width, height, preset in ((1080, 1920, 'veryfast'), (720, 1280, 'ultrafast')):
         filters = f'fps=30,scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1'
         command = [get_ffmpeg_path(), '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2',
-                   '-fflags', '+genpts', '-i', str(raw), '-t', str(length), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+                   '-fflags', '+genpts', '-protocol_whitelist', 'file,pipe', '-i', str(raw), '-t', str(length), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
                    '-filter_threads', '1', '-vf', filters, '-c:v', 'libx264', '-threads', '2', '-preset', preset, '-crf', '22',
                    '-c:a', 'aac', '-b:a', '128k', '-af', 'aresample=async=1:first_pts=0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)]
         try:
