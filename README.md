@@ -8,7 +8,7 @@ The dashboard shows YouTube API values. Missing data is shown as unavailable, an
 
 Follow [RAILWAY_SETUP_TAMIL.md](RAILWAY_SETUP_TAMIL.md) for manual GitHub upload, Railway settings, variables, persistent storage and Google OAuth redirects. Upload the contents of the prepared `github-upload` folder to the repository root, or extract `github-upload.zip` first. The deployment package contains 18 application/deployment files; local diagnostics, tests, credentials and runtime state are excluded.
 
-Railway uses the root `Dockerfile` and `python start.py`. Attach a volume at `/data` and set `BOT_DATA_DIR=/data` to retain YouTube login, bot settings and saved Gemini key/model across redeploys. Use one replica with sleep disabled. Keep automation disabled until connections and timing settings are configured. The package was locally started and verified with isolated credentials; an actual Railway deployment and Linux Docker build have not yet been performed.
+Railway uses the root `Dockerfile` and `python start.py`. Attach a volume at `/data` and set `BOT_DATA_DIR=/data` to retain YouTube login, bot settings and saved Gemini key/model across redeploys. Use one replica with sleep disabled. Keep automation disabled until connections and timing settings are configured. The package was locally verified with isolated credentials and deployed successfully on Railway with a Linux Docker build.
 
 ## Configuration
 
@@ -21,7 +21,7 @@ Keep `.env`, `client_secrets.json`, `token.json` and `token.pickle` private. Exi
 - `YOUTUBE_CLIENT_ID` / `YOUTUBE_CLIENT_SECRET`, or `client_secrets.json`: Google OAuth client.
 - `PUBLIC_BASE_URL`: defaults to `http://localhost:8000`. Register `<PUBLIC_BASE_URL>/auth/callback` in the OAuth client's authorized redirect URIs. Remote hosting requires HTTPS.
 - `SESSION_SECRET`: optional stable random secret; without it, restarting the app signs users out.
-- `BOT_AUTOMATION_ENABLED=0`: disables scheduled background actions for a read-only preview. Manual actions are still available.
+- `BOT_AUTOMATION_ENABLED=0`: initial paused worker state; Scheduler Start/Pause is saved and takes precedence on later restarts. Manual actions remain available.
 - `BOT_OFFLINE=1`: skips initial YouTube connection for offline testing.
 - `YTDLP_COOKIE_FILE`: optional path to a local cookies file for sources that require authentication.
 - `BOT_DATA_DIR`: optional persistent state directory; use `/data` with a Railway volume. Local runs default to the project directory. Cloud UI Gemini changes are saved in `settings.env` there.
@@ -39,7 +39,7 @@ Click **Connect / Reconnect YouTube** if the saved login expires. Google consent
 - Clips must pass video validation and vertical conversion before upload. The downloader retries alternate formats, then falls back to downloading the source and cutting the same offset locally. Downloads and processing have time/size bounds. Conversion uses bounded CPU threads and 30 fps, trying 1080×1920 then 720×1280. Failed conversions never upload the original horizontal file.
 - Scheduled Shorts are uploaded privately with a UTC publish time converted from the chosen local time. YouTube handles publication even if the bot later stops. Drafts remain tracked if publication cannot be confirmed.
 - Automatic creation respects the configured daily slot count. Scheduled mode prepares up to one hour early. Immediate mode creates at the slot. Turn off Automatic Shorts Creation to stop new automatic uploads; existing YouTube schedules remain in YouTube Studio.
-- **Auto-Public: Shorts, Videos & Live** publishes private/unlisted uploads, completed recordings and active/upcoming broadcasts. It checks all uploads with pagination. Future `publishAt` schedules remain intact until their chosen time. The current saved toggle is ON, as requested. Turn it OFF and save to stop this behavior.
+- **Auto-Public: Shorts, Videos & Live** publishes private/unlisted uploads, completed recordings and active/upcoming broadcasts. It checks all uploads with pagination. Future `publishAt` schedules remain intact until their chosen time. Enable this toggle only when all eligible non-public uploads should become public. Turn it OFF and save to stop this behavior.
 - Metadata generation uses the source title/description; it does not inspect footage. Content suggestions are labeled as suggestions, not measured audience insights.
 
 YouTube may keep uploads private due to API project restrictions, processing or account limits. The dashboard reports the actual returned visibility instead of guaranteeing publication. Uploads and sends depend on API quota, connectivity, channel permissions and source availability.
@@ -78,3 +78,13 @@ The latest live attempt returned HTTP 400 `uploadLimitExceeded`, which is the ch
 A later local-preparation request also reached Gemini's daily free-tier quota (429). Daily quota errors are reported without repeating requests as if they were transient failures. Wait for quota reset or review your API plan/billing. The ready MP4 is 30.0 seconds at 1080×1920; its accompanying metadata is explicitly labeled as prepared by Codex from the source, rather than a successful Gemini response.
 
 `prepare_short.py` prepares a real 30-second vertical MP4 and AI metadata locally without uploading. `prepared-short-result.json` points to the latest prepared files. `create_verified_short.py --publish` explicitly creates and uploads one real public Short; do not run it repeatedly while the channel limit remains. `apply_public_visibility.py --apply` applies the enabled Auto-Public setting once, without uploading or sending messages.
+# Scheduler save and running state
+
+In **Scheduler & 1-Hour Drafts**, clock times, daily count and posting mode save automatically. Wait for **Times saved** before closing. Duplicate or incomplete times show **Not saved** and keep the previous saved schedule. All times use the displayed `BOT_TIMEZONE` (default Asia/Kolkata).
+
+Choose **Automation worker → Running**, enable **Automatic Shorts Creation**, then press **Save Timing Settings & Apply** to start automatic creation. Feature toggles and Start/Pause require this explicit apply; changing a time alone preserves those settings. The saved worker state persists in `BOT_DATA_DIR/bot_settings.json` across restarts. `BOT_AUTOMATION_ENABLED` supplies the initial state only when no saved worker preference exists.
+
+The Shorts worker checks every 30 seconds independently of comment maintenance. Scheduled mode prepares an upload in the hour before the slot. Immediate mode starts processing at the slot; download/render/upload time means publication is later. Failed attempts use persisted retry delays, and confirmed slots are skipped. Retries stop 10 minutes after a missed slot; the last failure remains visible. Pausing stops new automatic work, while an already running job finishes. Existing YouTube scheduled uploads retain their schedule.
+
+The scheduler panel shows paused connections/features, the next posting time, saved originals and the last automatic failure. If YouTube blocks the Railway download, save the matching full original in **Settings → Source recordings** once. That saved source is preferred for later automatic Shorts; saving it clears its retry delay. A Gemini key or a different posting time cannot grant media-download access. YouTube upload limits and scheduled publication still depend on the channel/API.
+
