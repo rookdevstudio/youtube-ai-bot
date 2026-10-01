@@ -134,6 +134,19 @@ app = FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None)
 templates = Jinja2Templates(directory=str(BASE_DIR/'templates'))
 
 
+def local_schedule_time(value):
+    try:
+        target = dt.datetime.fromisoformat(value.replace('Z','+00:00'))
+        if target.tzinfo is None:
+            raise ValueError('Schedule has no timezone.')
+        return target.astimezone(yt_service.tz).strftime('%d %b %Y, %H:%M')
+    except (AttributeError,ValueError):
+        return 'Unknown schedule; check YouTube Studio'
+
+
+templates.env.filters['local_schedule_time'] = local_schedule_time
+
+
 def check_auth(request):
     try:
         return signer.loads(request.cookies.get('auth_session',''),salt='login',max_age=43200) == 'admin'
