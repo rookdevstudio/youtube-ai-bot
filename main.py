@@ -77,28 +77,54 @@ def run_safely(label,fn,*args):
 
 
 def fast_live_chat_engine():
-    run_safely('Live engine',yt_service.check_and_reply_live,ai_service,add_log)
+    if yt_service.settings.get('automation_enabled'):
+        run_safely('Live engine',yt_service.check_and_reply_live,ai_service,add_log)
 
 
 def periodic_engine():
+    if not yt_service.settings.get('automation_enabled'):
+        return
     for label,fn,args in (
         ('Draft sync',yt_service.auto_publish_due_drafts,(add_log,)),
         ('Comments',yt_service.check_and_quick_reply_comments,(ai_service,add_log)),
-        ('Privacy guard',yt_service.check_and_update_stream_privacy,(30,add_log)),
-        ('Short scheduler',yt_service.check_and_prestage_1h_drafts,(ai_service,add_log))):
+        ('Privacy guard',yt_service.check_and_update_stream_privacy,(30,add_log))):
         if yt_service.youtube:
             run_safely(label,fn,*args)
+
+
+def scheduled_creation(fn,*args,**kwargs):
+    with job_lock:
+        if active_job['active'] or yt_service.creation_lock.locked():
+            return False
+        job_id = secrets.token_hex(12)
+        active_job.update(active=True,job_id=job_id,video_title=args[1],status='starting',progress=0,step_index=1,
+                          step_text='Automatic scheduled Short…',video_id='',short_url='',playlist_url='',error='')
+    def report(*values,**keywords):
+        with job_lock:
+            if active_job['job_id']==job_id:
+                update_job_status(*values,**keywords)
+    try:
+        return fn(*args,progress_fn=report,**kwargs)
+    finally:
+        with job_lock:
+            if active_job['job_id']==job_id and active_job['active']:
+                report(0,0,'error','Automatic Short stopped before completion.',error='Check Activity for the failure reason.')
+
+
+def short_scheduler_engine():
+    if yt_service.settings.get('automation_enabled'):
+        run_safely('Short scheduler',yt_service.check_and_prestage_1h_drafts,ai_service,add_log,scheduled_creation)
 
 
 @asynccontextmanager
 async def lifespan(app):
     if os.getenv('BOT_OFFLINE') != '1':
         await __import__('asyncio').to_thread(yt_service.load_saved_credentials)
-    if os.getenv('BOT_AUTOMATION_ENABLED','1') == '1':
-        scheduler.add_job(fast_live_chat_engine,'interval',seconds=6,max_instances=1,coalesce=True,id='live',replace_existing=True)
-        scheduler.add_job(periodic_engine,'interval',seconds=120,max_instances=1,coalesce=True,id='periodic',replace_existing=True)
-        scheduler.start()
-        add_log('Scheduler started; enabled features run when their connections are available.')
+    scheduler.add_job(fast_live_chat_engine,'interval',seconds=6,max_instances=1,coalesce=True,id='live',replace_existing=True)
+    scheduler.add_job(periodic_engine,'interval',seconds=120,max_instances=1,coalesce=True,id='periodic',replace_existing=True)
+    scheduler.add_job(short_scheduler_engine,'interval',seconds=30,max_instances=1,coalesce=True,id='shorts',replace_existing=True)
+    scheduler.start()
+    add_log('Worker ready. Automation '+('running.' if yt_service.settings.get('automation_enabled') else 'paused; start it in Scheduler.'))
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)
@@ -158,7 +184,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.01-source-recordings'
+        result['release'] = '2026.10.02-scheduler-persistence'
     return result
 
 
@@ -206,6 +232,7 @@ def save_source_recording(video_id:str=Form(...), recording:UploadFile=File(...)
                 if abs(duration - expected) > max(3,expected * .001):
                     raise ValueError('Upload the full original recording for the selected video; its duration must match the channel video.')
                 os.replace(temporary,destination)
+                yt_service.clear_source_retries(video_id)
             finally:
                 if temporary and temporary.exists():
                     temporary.unlink()
@@ -360,7 +387,7 @@ def index(request:Request):
     comments = yt_service.get_recent_comments_2days()
     return templates.TemplateResponse(request=request,name='index.html',context=dict(
         yt_connected=bool(yt_service.youtube and yt_service.channel_id),ai_configured=bool(ai_service),
-        automation_running=scheduler.running,channel_id=yt_service.channel_id,channel_name=yt_service.channel_name,
+        automation_running=scheduler.running and yt_service.settings.get('automation_enabled'),channel_id=yt_service.channel_id,channel_name=yt_service.channel_name,
         ai_model=ai_service.model if ai_service else '',saved_source_ids=yt_service.saved_source_ids(),
         source_videos=[v for category in ('videos','live') for v in categorized[category] if not v.get('is_live') and parse_iso_duration(v.get('duration'))>=30],
         analytics=analytics,categorized=categorized,total_uploads_count=len(combined),playlist_id=yt_service.cached_playlist_id or '',
@@ -379,7 +406,7 @@ def job_status():
 @app.get('/api/live-chat-status')
 def live_status():
     return {**yt_service.get_active_live_stream_info(),'messages':list(yt_service.live_chat_history)[-25:],
-            'reply_enabled':bool(yt_service.settings.get('live_chat_reply') and ai_service and scheduler.running)}
+            'reply_enabled':bool(yt_service.settings.get('live_chat_reply') and ai_service and scheduler.running and yt_service.settings.get('automation_enabled'))}
 
 
 @app.post('/api/send-live-chat')
@@ -495,10 +522,44 @@ def publish(video_id:str=Form(...)):
 
 @app.post('/update-settings')
 async def settings(request:Request,comments_reply:bool=Form(False),live_chat_reply:bool=Form(False),privacy_guard:bool=Form(False),
-                   auto_stream_select:bool=Form(False),daily_shorts_count:int=Form(3),post_mode:str=Form('scheduled')):
+                   auto_stream_select:bool=Form(False),daily_shorts_count:int=Form(3),post_mode:str=Form('scheduled'),automation_enabled:bool|None=Form(None)):
     form = await request.form()
-    yt_service.save_settings(dict(comments_reply=comments_reply,live_chat_reply=live_chat_reply,privacy_guard=privacy_guard,
+    cfg = dict(comments_reply=comments_reply,live_chat_reply=live_chat_reply,privacy_guard=privacy_guard,
         auto_stream_select=auto_stream_select,daily_shorts_count=daily_shorts_count,post_mode=post_mode,
-        posting_times=', '.join(str(t).strip() for t in form.getlist('time_slot'))))
+        posting_times=', '.join(str(t).strip() for t in form.getlist('time_slot')))
+    if automation_enabled is not None:
+        cfg['automation_enabled'] = automation_enabled
+    yt_service.save_settings(cfg)
     add_log('Settings saved. Posting times use '+str(yt_service.tz))
-    return RedirectResponse('/',status_code=303)
+    if 'application/json' in request.headers.get('accept',''):
+        return scheduler_status()
+    return RedirectResponse('/#scheduler',status_code=303)
+
+
+@app.get('/api/scheduler-status')
+def scheduler_status():
+    settings = dict(yt_service.settings)
+    running = bool(scheduler.running and settings.get('automation_enabled'))
+    blockers = []
+    if not running: blockers.append('Automation paused. Choose Running and Save & Apply.')
+    if not settings.get('auto_stream_select'): blockers.append('Automatic Shorts Creation is OFF.')
+    if not yt_service.youtube: blockers.append('Connect YouTube in Settings.')
+    if not ai_service: blockers.append('Save a Gemini API key in Settings.')
+    slots = [s.strip() for s in settings['posting_times'].split(',')][:settings['daily_shorts_count']]
+    now = dt.datetime.now(yt_service.tz)
+    upcoming = min(yt_service.next_slot(slot,now) for slot in slots)
+    retries = [v for k,v in yt_service.slot_retries.items() if k.startswith(f'{yt_service.channel_id}:')]
+    last = max(retries,key=lambda v:v.get('failed_at',''),default={})
+    retry_at = last.get('next_retry',0)
+    return dict(settings=settings,running=running,timezone=str(yt_service.tz),server_time=now.isoformat(),
+                next_slot=upcoming.isoformat(),blockers=blockers,last_failure=last.get('last_error',''),
+                retry_at=dt.datetime.fromtimestamp(retry_at,yt_service.tz).isoformat() if retry_at else '',
+                saved_recordings=len(yt_service.saved_source_ids()),job=job_status())
+
+
+@app.post('/api/settings/timing')
+async def save_timing(request:Request,daily_shorts_count:int=Form(...),post_mode:str=Form(...)):
+    form = await request.form()
+    yt_service.save_timing(daily_shorts_count,[str(s).strip() for s in form.getlist('time_slot')],post_mode)
+    add_log('Posting times saved: '+yt_service.settings['posting_times']+' ('+str(yt_service.tz)+').')
+    return scheduler_status()
