@@ -29,7 +29,7 @@ def parse_iso_duration(value):
     return int(sum(float(n or 0)*f for n, f in zip(match.groups(), (86400,3600,60,1)))) if match else 0
 
 
-from media_tools import get_ffmpeg_path, probe_video, download_clip_robustly, convert_vertical_clip
+from media_tools import get_ffmpeg_path, probe_video, download_clip_robustly, convert_vertical_clip, trim_local
 
 
 def atomic_json(path, value):
@@ -426,7 +426,8 @@ class YouTubeService:
     def select_source_video_for_shorts(self):
         cats = self.get_categorized_channel_videos()
         pool = [v for cat in ('live','videos') for v in cats[cat] if not v.get('is_live') and parse_iso_duration(v.get('duration'))>=30]
-        return max(pool,key=lambda v:v.get('published_at',''),default={})
+        saved = set(self.saved_source_ids())
+        return max(pool,key=lambda v:(v['id'] in saved,v.get('published_at','')),default={})
 
     def next_slot(self,slot,now=None):
         now = now or dt.datetime.now(self.tz)
@@ -492,6 +493,17 @@ class YouTubeService:
             raise ValueError('Select a completed recording. Active stream clipping is not supported.')
         return item
 
+    def source_recording_path(self, video_id):
+        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', video_id) or not re.fullmatch(r'[A-Za-z0-9_-]+', self.channel_id or ''):
+            raise ValueError('Connect YouTube and select a valid source video.')
+        return Path(self.base_dir)/'source_recordings'/self.channel_id/(video_id+'.mp4')
+
+    def saved_source_ids(self):
+        if not self.channel_id:
+            return []
+        directory = self.source_recording_path('abcdefghijk').parent
+        return sorted(p.stem for p in directory.glob('*.mp4') if re.fullmatch(r'[A-Za-z0-9_-]{11}', p.stem))
+
     def create_custom_short_from_video(self,video_id,video_title,ai_service,action,custom_time,log_fn=print,progress_fn=None,draft_key=None,target_time=None):
         report = progress_fn or (lambda *args,**kwargs:None)
         if not self.creation_lock.acquire(blocking=False):
@@ -514,11 +526,15 @@ class YouTubeService:
             if offset + length > seconds:
                 offset = 0
             part = int(self.history.get(f'part_{video_id}',0))+1
-            report(1,10,'snipping','Downloading the selected source segment…')
+            recording = self.source_recording_path(video_id)
+            report(1,10,'snipping','Cutting the saved recording…' if recording.is_file() else 'Downloading the selected source segment…')
             with tempfile.TemporaryDirectory(prefix='youtube-short-') as folder:
                 raw,out = str(Path(folder)/'source.mp4'),str(Path(folder)/'short.mp4')
                 ffmpeg = get_ffmpeg_path()
-                download_clip_robustly(f'https://www.youtube.com/watch?v={video_id}',offset,length,raw,ffmpeg,str(Path(ffmpeg).parent),log_fn)
+                if recording.is_file():
+                    trim_local(recording,raw,offset,length,ffmpeg)
+                else:
+                    download_clip_robustly(f'https://www.youtube.com/watch?v={video_id}',offset,length,raw,ffmpeg,str(Path(ffmpeg).parent),log_fn)
                 report(2,45,'converting','Converting and validating the vertical clip…')
                 convert_vertical_clip(raw,out,length,log_fn)
                 report(3,70,'generating_ai','Generating metadata from the source title and description…')
