@@ -87,7 +87,7 @@ YOUTUBE_CLIENT_SECRET=REPLACE_WITH_MATCHING_OAUTH_CLIENT_SECRET
 | `SESSION_SECRET` | குறைந்தது 32 random characters. இதை அடிக்கடி மாற்ற வேண்டாம்; மாற்றினால் existing dashboard sessions முடியும். |
 | `BOT_DATA_DIR` | `/data`; attached volume mount path-க்கும் இதே value. |
 | `BOT_TIMEZONE` | `Asia/Kolkata`; இந்திய நேரப்படி scheduling. |
-| `BOT_AUTOMATION_ENABLED` | Setup முடியும்வரை `0`; பின்னர் `1` செய்து deploy செய்யவும். |
+| `BOT_AUTOMATION_ENABLED` | முதல் startup-ல் `0` வைத்து paused ஆகத் தொடங்கவும். பின்னர் Scheduler → Automation worker → Running → Save & Apply. Saved preference restart பிறகும் தொடரும். |
 | `BOT_OFFLINE` | `0`; saved YouTube connection load ஆக வேண்டும். |
 | `FORWARDED_ALLOW_IPS` | Railway proxy deployment-க்கு `*`; Dockerfile-லும் இது உள்ளது. HTTPS login/cookies மற்றும் request URLs சரியாக அமையும். |
 | `YOUTUBE_CLIENT_ID` | Google OAuth **Web application** client ID; பொதுவாக `.apps.googleusercontent.com` என்று முடியும். |
@@ -172,8 +172,8 @@ External OAuth app **Testing** நிலையில் இருந்தால
 4. Dropdown-ல் model select → **Test & Save**. Key/model test வெற்றியாக வேண்டும். Gemini daily quota இருந்தால் அது reset ஆக வேண்டும் அல்லது உங்கள் API plan/billing-ஐச் சரிபார்க்க வேண்டும்.
 5. **Scheduler** tab-ல் தினசரி Shorts count, நேரங்கள் மற்றும் posting mode தேர்வு செய்யவும்.
 6. தேவையான toggles ON: **Automatic Shorts Creation**, **Auto-Public: Shorts, Videos & Live**, தேவையெனில் comments/live replies.
-7. **Save Timing Settings & Apply**.
-8. Railway Variables-ல் `BOT_AUTOMATION_ENABLED=1` மாற்றி **Deploy / Apply** செய்யவும்.
+7. **Automation worker → Running** தேர்வு செய்து **Save Timing Settings & Apply** அழுத்தவும்.
+8. **Scheduler running** காட்டுகிறதா சரிபார்க்கவும். நேரம்/count/mode மாற்றங்கள் தானாக save ஆகும்; **Times saved** வந்தபின் page-ஐ close செய்யலாம். Worker/toggles-க்கு Save & Apply வேண்டும். Railway variable மாற்றுவது saved preference-ஐ மாற்றாது.
 9. App-ல் automation running மற்றும் YouTube connected நிலையைப் பார்க்கவும். Settings/key/model மறுபடியும் கேட்கக்கூடாது; volume-ல் save ஆகியிருக்க வேண்டும்.
 
 Auto-Public ON என்றால் connected channel-ன் private/unlisted uploads மற்றும் streams Public ஆக மாற்றப்படும். Future publish schedules அவற்றின் நேரம் வரை காத்திருக்கும். Cloud-ல் முதல் deployment புதிய state-உடன் தொடங்கும்; local `bot_settings.json` GitHub-ல் செல்லாது. Cloud dashboard-ல் settings-ஐ ஒருமுறை தேர்வு செய்ய வேண்டும்.
@@ -211,7 +211,7 @@ Railway bot வேலை செய்யத் தொடங்கியபிற
 | Gemini 429 | API quota; server upgrade இதை மாற்றாது. |
 | uploadLimitExceeded | YouTube channel upload limit; புதிய upload accepted ஆகாது. YouTube வழிகாட்டுதல்படி பின்னர் retry செய்யவும். |
 | Source access / bot verification error | YouTube data-center downloads சில source-களில் தடுக்கப்படலாம். Browser-ல் source playable என்பதைச் சரிபார்க்கவும். தேவையானால் உங்களுடைய authorized local cookies file-ஐ volume-ல் வைத்து `YTDLP_COOKIE_FILE=/data/cookies.txt` பயன்படுத்தலாம்; cookies GitHub-ல் செல்லக்கூடாது. |
-| Automatic creation இல்லை | `BOT_AUTOMATION_ENABLED=1`, Automatic Shorts toggle ON, நேரங்கள் Save, channel/AI ready, குறைந்தது 30 seconds completed source உள்ளதா? |
+| Automatic creation இல்லை | Scheduler → Automation worker Running + Save & Apply, Automatic Shorts toggle ON, Times saved, channel/AI ready, குறைந்தது 30 seconds completed source உள்ளதா? Last automatic attempt-ல் download block இருந்தால் original recording save செய்யவும். |
 
 ## 10. புதிய code update செய்யும்போது
 
