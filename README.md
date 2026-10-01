@@ -44,12 +44,20 @@ Click **Connect / Reconnect YouTube** if the saved login expires. Google consent
 
 YouTube may keep uploads private due to API project restrictions, processing or account limits. The dashboard reports the actual returned visibility instead of guaranteeing publication. Uploads and sends depend on API quota, connectivity, channel permissions and source availability.
 
+## Source download recovery and saved API keys
+
+YouTube can refuse downloads from a cloud server even when the channel's Google connection works. The bot stops repeated format attempts on a sign-in/bot block and explains the recovery. The deployment installs yt-dlp's matching EJS component alongside Node 22.
+
+In **Settings → Source recordings**, select the matching completed channel video and upload its original full recording once (up to 1 GB; 2 GB total saved copies, subject to available volume space). The duration must match the channel video. Manual Shorts use the selected recording; automatic selection prefers the newest video with a saved copy. Cutting, vertical conversion, source-based Gemini metadata and YouTube upload continue through the existing pipeline. Saved recordings are channel-scoped under `BOT_DATA_DIR`, survive restart with the Railway volume, and are never included in the GitHub package. Remove an unused copy in Settings to free space.
+
+In **Settings → Gemini AI**, paste once, load models, select one and **Test & Save**. Reopening the page shows **API key saved — ready to use** and the selected model. The actual key stays hidden on the server; blank input retains it. A failed catalogue refresh does not erase the saved model. Gemini quota and YouTube permission/upload limits still apply.
+
 ## Verification
 
 Run from this folder:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest test_bot test_extended test_improvements test_deployment -v
+.\.venv\Scripts\python.exe -m unittest test_bot test_extended test_improvements test_deployment test_source_recordings -v
 .\.venv\Scripts\python.exe diagnose.py --ai
 ```
 
