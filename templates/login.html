@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ta" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YouTube AI Bot - Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white flex items-center justify-center min-h-screen p-4">
+  <div class="bg-slate-800 p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-700">
+    <div class="text-center mb-6">
+      <span class="text-4xl">🤖</span>
+      <h1 class="text-2xl font-bold mt-2">YouTube AI Bot</h1>
+      <p class="text-xs text-slate-400">Enter Admin Password to enter</p>
+    </div>
+    {% if request.query_params.get('error') %}<p class="text-red-300 mb-3">Incorrect password. Try again.</p>{% endif %}
+    {% if not configured %}<p class="text-amber-300 mb-3">Set ADMIN_PASSWORD in .env and restart the app.</p>{% endif %}
+    <form action="/login" method="POST" class="space-y-4">
+      <input type="password" name="password" placeholder="Enter Admin Password" required 
+             class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 focus:outline-none focus:border-red-500">
+      <button type="submit" class="w-full bg-red-600 hover:bg-red-700 py-3 rounded-xl font-bold transition">
+        Unlock Dashboard
+      </button>
+    </form>
+  </div>
+</body>
+</html>
