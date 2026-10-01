@@ -19,3 +19,4 @@ github-upload.zip
 settings.env
 data/
 source_recordings/
+slot_retries.json
