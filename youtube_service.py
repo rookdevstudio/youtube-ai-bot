@@ -66,9 +66,11 @@ class YouTubeService:
         self.live_reply_receipts = self._load('live_reply_receipts.json', {})
         self.history = self._load('clips_history.json', {})
         self.drafts = self._load('draft_queue.json', [])
+        self.slot_retries = self._load('slot_retries.json', {})
         self.replied_comments_map = self._load('replied_comments.json', {})
         defaults = dict(comments_reply=False, live_chat_reply=False, privacy_guard=False, auto_stream_select=False,
-                        daily_shorts_count=3, post_mode='scheduled', posting_times='06:00, 11:00, 18:30')
+                        daily_shorts_count=3, post_mode='scheduled', posting_times='06:00, 11:00, 18:30',
+                        automation_enabled=os.getenv('BOT_AUTOMATION_ENABLED','1') == '1')
         self.settings = {**defaults, **self._load('bot_settings.json', {})}
         cache = self._load('cached_channel_videos.json', {})
         if cache.get('channel_id') and isinstance(cache.get('data'), dict):
@@ -172,6 +174,7 @@ class YouTubeService:
 
     @serialized
     def save_settings(self, cfg):
+        cfg = {**self.settings, **cfg}
         count = cfg.get('daily_shorts_count')
         slots = [s.strip() for s in cfg.get('posting_times', '').split(',') if s.strip()]
         if not isinstance(count, int) or not 1 <= count <= 5:
@@ -184,6 +187,15 @@ class YouTubeService:
             raise ValueError('Invalid posting mode.')
         self._save('bot_settings.json', cfg)
         self.settings = cfg
+
+    @serialized
+    def save_timing(self, count, slots, mode):
+        self.save_settings(dict(daily_shorts_count=count, posting_times=', '.join(slots), post_mode=mode))
+
+    @serialized
+    def clear_source_retries(self, video_id):
+        self.slot_retries = {k:v for k,v in self.slot_retries.items() if v.get('video_id') != video_id}
+        self._save('slot_retries.json', self.slot_retries)
 
     def get_detailed_analytics(self):
         if self.cached_analytics and time.time()-self.cached_analytics_time < 300:
@@ -588,25 +600,49 @@ class YouTubeService:
         return self.create_custom_short_from_video(source['id'],source['title'],ai_service,'draft',slot_time,log_fn,progress_fn,
             draft_key,target_time or self.next_slot(slot_time))
 
-    def check_and_prestage_1h_drafts(self,ai_service,log_fn=print):
+    def check_and_prestage_1h_drafts(self,ai_service,log_fn=print,runner=None):
         if not self.youtube or not ai_service or not self.settings.get('auto_stream_select') or self.creation_lock.locked():
             return
         now = dt.datetime.now(self.tz)
         slots = [s.strip() for s in self.settings['posting_times'].split(',')][:self.settings['daily_shorts_count']]
-        for slot in slots:
-            for date in (now.date(),(now+dt.timedelta(days=1)).date()):
-                target = dt.datetime.combine(date,dt.time.fromisoformat(slot),self.tz)
-                delta,key = (target-now).total_seconds(),f'{date.isoformat()}_{slot}'
-                if key in self.history or any(d.get('slot')==key for d in self.drafts):
-                    continue
-                if self.settings.get('post_mode')=='scheduled' and 0<delta<=3600:
-                    self.create_prestage_draft(ai_service,slot,key,log_fn,target_time=target)
-                    return
-                if -600<=delta<=0:
-                    source = self.select_source_video_for_shorts()
-                    if source:
-                        self.create_custom_short_from_video(source['id'],source['title'],ai_service,'instant','',log_fn,draft_key=key)
-                    return
+        targets = sorted(dt.datetime.combine(date,dt.time.fromisoformat(slot),self.tz)
+                         for date in (now.date(),(now+dt.timedelta(days=1)).date()) for slot in slots)
+        for target in targets:
+            slot = target.strftime('%H:%M')
+            delta,key = (target-now).total_seconds(),f'{target:%Y-%m-%d}_{slot}'
+            if key in self.history or any(d.get('slot')==key for d in self.drafts):
+                continue
+            if not (-600<=delta<=0 or self.settings.get('post_mode')=='scheduled' and 0<delta<=3600):
+                continue
+            retry_key = f'{self.channel_id}:{key}'
+            retry = self.slot_retries.get(retry_key,{})
+            if retry.get('next_retry',0) > now.timestamp():
+                continue
+            source = self.select_source_video_for_shorts()
+            if not source:
+                self.errors['Short scheduler'] = 'Short scheduler: No completed source recording is available.'
+                return
+            self.errors.pop('Short creation',None)
+            if delta > 0:
+                fn,args,kwargs = self.create_custom_short_from_video,(source['id'],source['title'],ai_service,'draft',slot),dict(draft_key=key,target_time=target)
+            else:
+                fn,args,kwargs = self.create_custom_short_from_video,(source['id'],source['title'],ai_service,'instant',''),dict(draft_key=key)
+            result = runner(fn,*args,log_fn=log_fn,**kwargs) if runner else fn(*args,log_fn=log_fn,**kwargs)
+            if result is False:  # Another UI job claimed the worker; try again on the next tick.
+                return
+            with self.data_lock:
+                if result:
+                    self.slot_retries.pop(retry_key,None)
+                    self.errors.pop('Short scheduler',None)
+                else:
+                    attempts = retry.get('attempts',0)+1
+                    error = self.errors.get('Short creation','Short creation did not finish. Check Activity.')
+                    self.slot_retries[retry_key] = dict(video_id=source['id'],slot=key,attempts=attempts,
+                        last_error=error,failed_at=now.isoformat(),next_retry=now.timestamp()+min(600,60*2**min(attempts,4)))
+                cutoff = (now-dt.timedelta(days=2)).isoformat()
+                self.slot_retries = {k:v for k,v in self.slot_retries.items() if v.get('failed_at','')>=cutoff}
+                self._save('slot_retries.json',self.slot_retries)
+            return
 
     @serialized
     def publish_draft_instantly(self,youtube_id,log_fn=print):
