@@ -1,0 +1,13 @@
+*
+!Dockerfile
+!requirements.txt
+!requirements-lock.txt
+!main.py
+!youtube_service.py
+!ai_service.py
+!media_tools.py
+!settings_store.py
+!runtime_config.py
+!start.py
+!templates/
+!templates/**
