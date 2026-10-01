@@ -1071,10 +1071,12 @@
       const count = parseInt(document.getElementById("shortsCountSelect").value);
       const container = document.getElementById("clockPickersContainer");
       container.innerHTML = "";
+      const usedTimes = new Set();
 
       for (let i = 0; i < count; i++) {
-        const candidate = savedTimes[i] || defaultTimes[i] || "12:00";
+        const candidate = savedTimes[i] || defaultTimes.find(time => !usedTimes.has(time)) || "12:00";
         const val = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(candidate) ? candidate : "12:00";
+        usedTimes.add(val);
         const div = document.createElement("div");
         div.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 hover:border-rose-500/40 transition";
         div.innerHTML = `
