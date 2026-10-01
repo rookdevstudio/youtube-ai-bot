@@ -1211,7 +1211,7 @@
       if (pollInterval) clearInterval(pollInterval);
       pollInterval = setInterval(() => {
         fetch("/api/job-status")
-          .then(readResponse)
+          .then(response => readResponse(response, {allowJobError: true}))
           .then(job => {
             if (!job) return;
             document.getElementById("modalProgressBar").style.width = job.progress + "%";
@@ -1255,14 +1255,19 @@
       if (chatPoll) { clearInterval(chatPoll); chatPoll = null; }
     }
 
-    async function readResponse(response) {
+    async function readResponse(response, {allowJobError = false} = {}) {
       let data;
       try { data = await response.json(); } catch { throw new Error('Server returned an invalid response. Sign in again if your session expired.'); }
-      if (!response.ok || data.status === 'error') throw new Error(data.error || data.detail || 'Request failed');
+      if (!response.ok || (data.status === 'error' && !allowJobError)) throw new Error(data.error || data.detail || 'Request failed');
       return data;
     }
     function showJobError(error) {
       if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+      document.getElementById('modalStatusLog').textContent = 'Status: error | ' + (error.message || String(error));
+      document.getElementById('modalProgressText').textContent = 'Creation stopped. See the error below.';
+      document.getElementById('modalProgressBar').style.width = '0%';
+      document.getElementById('modalProgressPercent').textContent = '0%';
+      updateStepUI(0);
       document.getElementById('modalErrorText').textContent = error.message || String(error);
       document.getElementById('modalErrorBox').classList.remove('hidden');
     }
