@@ -975,17 +975,39 @@
         </section>
         <section class="glass-card p-6 rounded-3xl space-y-4">
           <h3 class="font-bold text-lg">Gemini AI</h3>
-          <p id="geminiConnectionLabel" class="text-sm text-slate-300"></p>
+          <p id="geminiConnectionLabel" class="text-sm text-slate-300">{{ 'API key saved — ready to use. Model: ' ~ ai_model if ai_configured else 'No Gemini key saved yet.' }}</p>
           <form action="/api/settings/gemini" method="post" data-connection-form class="space-y-4">
-            <label class="block text-sm">Gemini API key<input name="api_key" type="password" autocomplete="new-password" class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3" placeholder="Paste key; blank keeps the saved key"></label>
+            <label class="block text-sm">Gemini API key<input name="api_key" type="password" autocomplete="new-password" class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3" placeholder="{{ 'Saved key •••••••• — paste only to replace' if ai_configured else 'Paste key once, then Test & Save' }}"></label>
             <button id="loadGeminiModels" type="button" onclick="refreshModelList()" class="bg-slate-700 px-4 py-2 rounded-xl text-sm">Load / Refresh Models</button>
-            <label class="block text-sm">Gemini model<select id="geminiModelInput" name="model" required disabled class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3"><option value="">Load models to select</option></select></label>
+            <label class="block text-sm">Gemini model<select id="geminiModelInput" name="model" required disabled class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3">{% if ai_configured %}<option value="{{ ai_model }}" selected>{{ ai_model }} (saved)</option>{% else %}<option value="">Load models to select</option>{% endif %}</select></label>
             <p id="geminiModelMessage" role="status" class="text-xs text-slate-400"></p>
             <button id="saveGeminiSettings" disabled class="bg-emerald-600 disabled:opacity-50 px-4 py-3 rounded-xl font-bold text-sm" type="submit">Test &amp; Save</button>
-            <p class="text-xs text-slate-400">Paste your key, load models and select one. A small AI request checks compatibility before saving. Changes apply immediately; no code changes or restart needed.</p>
+            <p class="text-xs text-slate-400">Save once: paste your key, load models, select one and Test &amp; Save. The saved key and model stay ready after closing this page or restarting the bot. The key is hidden for privacy; leave the field blank to keep it. A small AI request checks compatibility before saving.</p>
           </form>
         </section>
       </div>
+      <section class="glass-card p-6 rounded-3xl space-y-4">
+        <h3 class="font-bold text-lg">Source recordings</h3>
+        <p class="text-sm text-slate-300">If YouTube blocks source downloads, save the original full video or completed livestream recording here once. Shorts and scheduled drafts will automatically cut the saved recording. Select the matching channel video; use the complete recording with the same timeline.</p>
+        <p class="text-xs text-slate-400">Auto selection prefers the newest channel video with a saved recording. Choose a specific library video to use another source.</p>
+        <p id="sourceRecordingStatus" class="text-xs text-emerald-300">{{ saved_source_ids | length }} recording(s) saved for this channel.</p>
+        <form action="/api/settings/source-recording" method="post" enctype="multipart/form-data" data-source-form class="space-y-3">
+          <label class="block text-sm">Channel source video<select name="video_id" required class="block w-full mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3">
+            <option value="">Select the matching video</option>
+            {% for video in source_videos %}
+            <option value="{{ video.id }}">{{ video.title }} — {{ video.id }}{{ ' (recording saved)' if video.id in saved_source_ids else '' }}</option>
+            {% endfor %}
+          </select></label>
+          <label class="block text-sm">Original recording<input name="recording" type="file" accept="video/*,.mkv,.webm" required class="block w-full mt-2 text-sm"></label>
+          <p class="text-xs text-slate-400">Maximum 1 GB per recording and 2 GB total saved recordings. Stored with your bot's persistent data. Saving a source does not publish a video.</p>
+          <button type="submit" class="bg-indigo-600 px-4 py-3 rounded-xl font-bold text-sm">Save source recording</button>
+        </form>
+        <form action="/api/settings/remove-source-recording" method="post" data-source-form class="flex flex-wrap gap-3">
+          <label class="text-sm">Remove saved copy<select name="video_id" id="savedSourceSelect" required class="block mt-2 bg-slate-950 border border-slate-700 rounded-xl p-3"><option value="">Select saved recording</option>{% for id in saved_source_ids %}<option value="{{ id }}">{{ id }}</option>{% endfor %}</select></label>
+          <button type="submit" class="self-end border border-slate-600 px-4 py-3 rounded-xl text-sm">Remove saved copy</button>
+        </form>
+        <p id="sourceRecordingMessage" role="status" aria-live="polite" class="text-sm text-emerald-300 break-words"></p>
+      </section>
     </div>
 
     <!-- FOOTER WITH ROOKDEVSTUDIO BRANDING -->
@@ -1289,7 +1311,7 @@
         document.getElementById('modalLiveTitle').textContent = error.message;
       } finally { input.disabled = false; }
     }
-    let savedGeminiModel = '';
+    let savedGeminiModel = {{ ai_model | tojson }};
     let modelListVersion = 0;
     let modelListInitialized = false;
     function invalidateModelList() {
@@ -1325,8 +1347,9 @@
         message.textContent = response.models.length + ' text models available. Test & Save verifies the selected model with this bot.';
       } catch (error) {
         if (version !== modelListVersion) return;
-        select.replaceChildren(new Option('Could not load models', ''));
-        message.textContent = error.message;
+        const saved = savedGeminiModel && !document.querySelector('input[name=api_key]').value;
+        select.replaceChildren(new Option(saved ? savedGeminiModel + ' (saved)' : 'Could not load models', saved ? savedGeminiModel : ''));
+        message.textContent = error.message + (saved ? ' Your saved key/model are unchanged; no need to paste again.' : '');
       } finally { if (version === modelListVersion) button.disabled = false; }
     }
     async function refreshConnections() {
@@ -1335,7 +1358,10 @@
         document.getElementById('youtubeConnectionLabel').textContent = status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.';
         document.getElementById('youtubeConnectButton').textContent = status.youtube_connected ? 'Reconnect / Change channel' : 'Connect YouTube';
         document.getElementById('youtubeDisconnectButton').classList.toggle('hidden', !status.youtube_connected);
-        document.getElementById('geminiConnectionLabel').textContent = status.ai_configured ? 'API key saved. Test it or paste a replacement below.' : 'No Gemini key saved yet.';
+        document.getElementById('geminiConnectionLabel').textContent = status.ai_configured ? 'API key saved — ready to use. Model: ' + status.model : 'No Gemini key saved yet.';
+        document.querySelector('input[name=api_key]').placeholder = status.ai_configured ? 'Saved key •••••••• — paste only to replace' : 'Paste key once, then Test & Save';
+        document.getElementById('sourceRecordingStatus').textContent = status.saved_source_ids.length + ' recording(s) saved for this channel.';
+        document.getElementById('savedSourceSelect').replaceChildren(new Option('Select saved recording', ''), ...status.saved_source_ids.map(id => new Option(id,id)));
         savedGeminiModel = status.model;
         if (!modelListInitialized && status.ai_configured && !document.querySelector('input[name=api_key]').value) {
           modelListInitialized = true;
@@ -1368,6 +1394,33 @@
         geminiControls.forEach(control => control.disabled = false);
         button.disabled = false;
       }
+    }));
+    document.querySelectorAll('[data-source-form]').forEach(form => form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const button = event.submitter;
+      const message = document.getElementById('sourceRecordingMessage');
+      const body = new FormData(form);
+      const file = body.get('recording');
+      if (file && file.size > 1024*1024*1024) { message.textContent = 'Recording exceeds the 1 GB upload limit.'; return; }
+      button.disabled = true;
+      message.textContent = file ? 'Uploading the recording…' : 'Removing saved source copy…';
+      try {
+        const result = await new Promise((resolve,reject) => {
+          const request = new XMLHttpRequest();
+          request.open('POST',form.action);
+          request.responseType = 'json';
+          request.upload.onprogress = progress => {
+            if (progress.lengthComputable && file) message.textContent = 'Uploading recording: ' + Math.round(progress.loaded/progress.total*100) + '%';
+          };
+          request.onload = () => request.status >= 200 && request.status < 300 ? resolve(request.response) : reject(new Error(request.response?.error || request.response?.detail || 'Source upload failed. Check your connection and sign in again if needed.'));
+          request.onerror = () => reject(new Error('Upload connection interrupted. Retry; any previously saved recording is unchanged.'));
+          request.send(body);
+        });
+        message.textContent = result.message;
+        form.reset();
+        await refreshConnections();
+      } catch (error) { message.textContent = error.message; }
+      finally { button.disabled = false; }
     }));
     document.addEventListener('submit', async event => {
       const form = event.target;
