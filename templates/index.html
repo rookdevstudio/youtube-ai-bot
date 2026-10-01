@@ -51,7 +51,7 @@
         </h1>
         <div class="flex items-center gap-2">
           <span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span class="text-[11px] text-slate-400 font-mono">{{ 'Scheduler running' if automation_running else 'Automation paused' }}</span>
+          <span id="automationBanner" class="text-[11px] text-slate-400 font-mono">{{ 'Scheduler running' if automation_running else 'Automation paused' }}</span>
         </div>
       </div>
     </div>
@@ -826,14 +826,18 @@
         <div class="flex justify-between items-center border-b border-white/[0.06] pb-3">
           <div>
             <span class="text-xs font-mono font-bold uppercase tracking-wider text-emerald-400">
-              {{ 'Daily automation enabled' if settings.auto_stream_select and automation_running and yt_connected and ai_configured else 'Daily automation unavailable or off' }}
+              <span id="schedulerRunningLabel">{{ 'Daily automation enabled' if settings.auto_stream_select and automation_running and yt_connected and ai_configured else 'Daily automation unavailable or off' }}</span>
             </span>
             <h3 class="text-base font-bold text-white mt-0.5">Automated Daily Upload Timetable</h3>
           </div>
           <span class="text-xs font-mono text-slate-400">Stream: {{ latest_stream_title[:28] }}...</span>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
+        <p id="schedulerReadiness" role="status" class="text-sm text-amber-300 mt-3"></p>
+        <p id="schedulerFailure" class="text-xs text-rose-300 mt-2 break-words"></p>
+        <p id="schedulerNextSlot" class="text-xs text-slate-300 mt-2"></p>
+        <p class="text-xs text-slate-400 mt-2">The browser can be closed. The Railway worker must stay running. YouTube controls processing, upload limits and publication.</p>
+        <div id="savedTimetable" class="grid grid-cols-1 sm:grid-cols-3 gap-3.5 mt-4">
           {% for slot in scheduled_slots %}
             <div class="p-3.5 rounded-xl bg-slate-900/80 border border-emerald-500/20 flex items-center justify-between">
               <div class="flex items-center gap-3">
@@ -854,7 +858,15 @@
       </div>
 
       <!-- Toggles & Interactive Clock Scheduler Form -->
-      <form action="/update-settings" method="POST" class="space-y-6">
+      <form id="schedulerSettingsForm" action="/update-settings" method="POST" class="space-y-6">
+        <div class="glass-card p-4 rounded-2xl">
+          <label for="automationState" class="block text-sm font-bold mb-2">Automation worker</label>
+          <select id="automationState" name="automation_enabled" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm">
+            <option value="false" {% if not settings.automation_enabled %}selected{% endif %}>Paused</option>
+            <option value="true" {% if settings.automation_enabled %}selected{% endif %}>Running</option>
+          </select>
+          <p class="text-xs text-slate-400 mt-2">Start / pause and feature toggles take effect after Save &amp; Apply. Pausing stops new automatic jobs; an upload already in progress finishes.</p>
+        </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
           <div class="glass-card p-6 rounded-3xl space-y-4">
@@ -945,6 +957,8 @@
               </div>
             </div>
 
+            <p id="timingSaveMessage" role="status" aria-live="polite" class="text-xs text-emerald-300">Times save automatically after a change. Wait for “Times saved” before closing.</p>
+            <p class="text-xs text-slate-400">All clock times use {{ timezone }}. Choose Schedule at Times to prepare the Short up to 1 hour early.</p>
             <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl text-xs shadow-lg shadow-emerald-600/20 transition mt-3">
               💾 Save Timing Settings &amp; Apply
             </button>
@@ -1048,11 +1062,12 @@
         const target = document.getElementById('viewContainer-' + tabName);
         if (target) target.classList.remove('hidden');
       }
+      history.replaceState(null, '', '#' + (tabName === 'comments' ? 'commentsHubSection' : tabName));
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function renderClockPickers() {
-      document.querySelectorAll("input[name=time_slot]").forEach((el, index) => { savedTimes[index] = el.value; });
+      document.querySelectorAll("#clockPickersContainer input[name=time_slot]").forEach((el, index) => { savedTimes[index] = el.value; });
       const count = parseInt(document.getElementById("shortsCountSelect").value);
       const container = document.getElementById("clockPickersContainer");
       container.innerHTML = "";
@@ -1070,13 +1085,87 @@
             <span class="text-xs font-semibold text-slate-200">Shorts #${i + 1} Upload Time:</span>
           </div>
           <div class="flex items-center gap-2">
-            <input type="time" name="time_slot" value="${val}" required
+            <input type="time" name="time_slot" aria-label="Short ${i + 1} posting time" value="${val}" required
                    class="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-xs font-mono text-rose-300 focus:outline-none focus:border-rose-500 cursor-pointer">
           </div>
         `;
         container.appendChild(div);
       }
     }
+
+    let timingSaveTimer = null;
+    let settingsSaveQueue = Promise.resolve();
+    let timingEditVersion = 0;
+    let timingIsDirty = false;
+    function renderSchedulerStatus(data) {
+      document.getElementById('automationBanner').textContent = data.running ? 'Scheduler running' : 'Automation paused';
+      document.getElementById('schedulerRunningLabel').textContent = data.running ? 'Automation worker running' : 'Automation paused';
+      document.getElementById('schedulerReadiness').textContent = data.blockers.length ? data.blockers.join(' ') : 'Automatic Shorts enabled. Next check within 30 seconds.';
+      const stamp = value => new Date(value).toLocaleString('en-GB', {timeZone: data.timezone, hour12:false});
+      document.getElementById('schedulerNextSlot').textContent = 'Next posting slot: ' + stamp(data.next_slot) + ' (' + data.timezone + '). Saved source recordings: ' + data.saved_recordings;
+      document.getElementById('schedulerFailure').textContent = data.last_failure ? 'Last automatic attempt: ' + data.last_failure + ' | Retry checks resume: ' + stamp(data.retry_at) + '. Retries run only within the slot window.' : '';
+      const container = document.getElementById('savedTimetable');
+      container.replaceChildren();
+      data.settings.posting_times.split(',').forEach((time,index) => {
+        const row = document.createElement('div');
+        row.className = 'p-3.5 rounded-xl bg-slate-900/80 border border-emerald-500/20 text-sm';
+        row.textContent = '#' + (index + 1) + ' · ' + time.trim() + ' · ' + data.timezone + ' · Saved';
+        container.appendChild(row);
+      });
+    }
+    function queueSettingsSave(allFeatures = false) {
+      const form = document.getElementById('schedulerSettingsForm');
+      const message = document.getElementById('timingSaveMessage');
+      const slots = Array.from(form.querySelectorAll('input[name=time_slot]'), el => el.value);
+      if (slots.some(value => !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) || new Set(slots).size !== slots.length) {
+        message.textContent = 'Not saved: choose a valid, different time for every Short.';
+        return Promise.resolve(false);
+      }
+      const version = timingEditVersion;
+      const body = new FormData(form);
+      const url = allFeatures ? form.action : '/api/settings/timing';
+      message.textContent = 'Saving…';
+      settingsSaveQueue = settingsSaveQueue.catch(() => {}).then(async () => {
+        try {
+          const response = await fetch(url, {method:'POST',body,headers:{Accept:'application/json'}});
+          const result = await readResponse(response);
+          renderSchedulerStatus(result);
+          if (version === timingEditVersion) {
+            timingIsDirty = false;
+            message.textContent = allFeatures ? 'Settings and times saved. ' + (result.running ? 'Automation running.' : 'Automation paused.') : 'Times saved: ' + result.settings.posting_times + ' (' + result.timezone + ').';
+          }
+          return true;
+        } catch (error) {
+          message.textContent = 'Not saved: ' + error.message + ' Retry Save & Apply.';
+          return false;
+        }
+      });
+      return settingsSaveQueue;
+    }
+    async function refreshSchedulerStatus() {
+      try { renderSchedulerStatus(await readResponse(await fetch('/api/scheduler-status'))); }
+      catch (error) { document.getElementById('schedulerReadiness').textContent = error.message; }
+    }
+    const schedulerForm = document.getElementById('schedulerSettingsForm');
+    schedulerForm.addEventListener('change', event => {
+      if (!['time_slot','daily_shorts_count','post_mode'].includes(event.target.name)) return;
+      timingEditVersion++;
+      timingIsDirty = true;
+      clearTimeout(timingSaveTimer);
+      document.getElementById('timingSaveMessage').textContent = 'Saving changed times…';
+      timingSaveTimer = setTimeout(() => queueSettingsSave(), 400);
+    });
+    schedulerForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      clearTimeout(timingSaveTimer);
+      const button = event.submitter;
+      if (button) button.disabled = true;
+      await queueSettingsSave(true);
+      if (button) button.disabled = false;
+    });
+    window.addEventListener('beforeunload', event => {
+      if (timingIsDirty) { event.preventDefault(); event.returnValue = ''; }
+    });
 
     function scrollCarousel(id, offset) {
       const el = document.getElementById(id);
@@ -1445,8 +1534,11 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       renderClockPickers();
-      switchMainTab(location.hash === '#settings' ? 'settings' : location.hash === '#commentsHubSection' ? 'comments' : 'overview');
+      const selected = location.hash.slice(1);
+      switchMainTab(selected === 'commentsHubSection' ? 'comments' : ['settings','scheduler','library','all'].includes(selected) ? selected : 'overview');
       refreshConnections();
+      refreshSchedulerStatus();
+      setInterval(refreshSchedulerStatus, 30000);
     });
   </script>
 </body>
