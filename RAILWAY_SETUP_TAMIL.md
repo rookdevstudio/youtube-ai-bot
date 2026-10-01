@@ -195,6 +195,10 @@ Railway bot வேலை செய்யத் தொடங்கியபிற
 
 ## 9. Error வந்தால்
 
+**“Sign in to confirm you’re not a bot” source download error:** Gemini key மாற்றவோ YouTube reconnect செய்யவோ தேவையில்லை. Update deploy ஆனபின் bot **Settings → Source recordings** திறக்கவும். Error வந்த channel video-ஐத் தேர்ந்தெடுத்து அதன் முழு original video / completed livestream recording-ஐ upload → **Save source recording**. பிறகு Short / Pre-stage மீண்டும் தொடங்கவும். அதே recording-ல் அடுத்தடுத்த 30-second clips தானாக cut ஆகும்; browser close / bot restart ஆனாலும் `/data` volume-ல் இருக்கும். Auto selection saved recording உள்ள latest video-க்கு முன்னுரிமை கொடுக்கும். File அதிகபட்சம் 1 GB; saved copies மொத்தம் 2 GB மற்றும் volume free space பொருந்தும்.
+
+**Gemini key ஒருமுறை போதும்:** paste → Load Models → model select → **Test & Save** வெற்றியானபின் மீண்டும் paste செய்ய வேண்டாம். Browser மீண்டும் திறந்தால் **API key saved — ready to use** மற்றும் model காட்டும். Key field-ல் actual secret காட்டாமல் saved indication தெரியும்; blank field பழைய key-ஐ வைத்துக்கொள்ளும்.
+
 | Error / நிலை | சரிபார்க்க வேண்டியது |
 |---|---|
 | Dockerfile not found / build missing files | Repo root-ல் `Dockerfile`, Python files, requirements மற்றும் `templates` இருக்கிறதா? Parent `github-upload` folder-க்குள் மட்டும் upload ஆகிவிட்டதா? |
