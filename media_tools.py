@@ -1,5 +1,6 @@
 """Bounded, validated media processing with useful redacted diagnostics."""
 import json
+import math
 import os
 import re
 import shutil
@@ -11,6 +12,13 @@ from pathlib import Path
 
 class SourceAccessError(RuntimeError):
     """YouTube refused access; repeating format attempts cannot repair a login block."""
+
+
+class BlankVideoError(RuntimeError):
+    """The file decodes but contains too little visible picture to upload."""
+    def __init__(self, message, health=None):
+        super().__init__(message)
+        self.health = health or {}
 
 
 def source_download_error(output):
@@ -66,10 +74,64 @@ def validate_duration(path, expected):
     return video, duration
 
 
+def inspect_video_frames(path, expected):
+    """Decode the whole bounded clip and inspect two small grayscale frames per second.
+
+    Spatial contrast permits real still images and dark scenes; a solid black,
+    white or single-color recording is not counted as visible footage.
+    """
+    if not 0 < expected <= 180:
+        raise ValueError('Frame validation supports clips up to 180 seconds.')
+    command = [get_ffmpeg_path(), '-hide_banner', '-loglevel', 'error', '-nostdin', '-threads', '2',
+               '-err_detect', 'explode', '-protocol_whitelist', 'file,pipe', '-i', str(path),
+               '-t', str(expected), '-map', '0:v:0', '-an', '-sn', '-dn', '-filter_threads', '1',
+               '-vf', 'setpts=PTS-STARTPTS,fps=2,scale=96:96,format=gray', '-frames:v', str(math.ceil(expected*2)+2),
+               '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1']
+    try:
+        result = subprocess.run(command,capture_output=True,timeout=120)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError('Frame validation timed out. No upload attempted.') from exc
+    except FileNotFoundError as exc:
+        raise RuntimeError('FFmpeg is missing; cannot verify video frames. No upload attempted.') from exc
+    if result.returncode or result.stderr.strip():
+        raise RuntimeError('Video frame decoding failed. No upload attempted. '+media_error(result.stderr.decode('utf-8',errors='replace')))
+    size = 96*96
+    if len(result.stdout) % size:
+        raise RuntimeError('Video frame decoding returned incomplete image data. No upload attempted.')
+    count, visible, run, longest, longest_end, prefix = len(result.stdout)//size,0,0,0,0,0
+    for index in range(count):
+        frame = result.stdout[index*size:(index+1)*size]
+        mean = sum(frame)/size
+        variance = max(0,sum(value*value for value in frame)/size-mean*mean)
+        has_picture = variance >= 4 and max(frame)-min(frame) >= 12
+        if has_picture:
+            visible += 1
+            run = 0
+        else:
+            run += 1
+            if index == prefix:
+                prefix += 1
+            if run > longest:
+                longest,longest_end = run,index+1
+    return dict(sample_count=count,visible_fraction=round(visible/count,4) if count else 0,
+                decoded_seconds=count/2,blank_prefix_seconds=prefix/2,
+                longest_blank_seconds=longest/2,next_offset_seconds=math.ceil(longest_end/2))
+
+
+def validate_picture(path, expected):
+    health = inspect_video_frames(path,expected)
+    if health['decoded_seconds'] < max(.5,expected-1):
+        raise RuntimeError(f"Incomplete decoded video: {health['decoded_seconds']:.1f}s of picture, expected {expected:.1f}s. No upload attempted.")
+    if health['visible_fraction'] < .8 or health['blank_prefix_seconds'] > 1.5 or health['longest_blank_seconds'] > 2:
+        raise BlankVideoError('The selected segment is blank or contains a long blank screen. No upload attempted.',health)
+    return health
+
+
 def trim_local(source, destination, offset, duration, ffmpeg):
     command = [ffmpeg, '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2', '-ss', str(offset), '-protocol_whitelist', 'file,pipe', '-i', str(source),
                '-t', str(duration), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn', '-c:v', 'libx264', '-threads', '2',
-               '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', str(destination)]
+               '-vf', 'setpts=PTS-STARTPTS', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+               '-af', 'asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0', '-movflags', '+faststart', str(destination)]
     result = run_media(command, 600)
     if result.returncode:
         raise RuntimeError('Local clip extraction failed: ' + media_error(result.stderr))
@@ -139,23 +201,34 @@ def convert_vertical_clip(raw, output, duration, log_fn=print):
     length = min(duration, source_duration)
     if source_duration < max(0.5, duration - 2):
         raise RuntimeError('Source clip is incomplete; download it again before conversion.')
+    validate_picture(raw,length)
     errors = []
     for width, height, preset in ((1080, 1920, 'veryfast'), (720, 1280, 'ultrafast')):
-        filters = f'fps=30,scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1'
-        command = [get_ffmpeg_path(), '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2',
-                   '-fflags', '+genpts', '-protocol_whitelist', 'file,pipe', '-i', str(raw), '-t', str(length), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
-                   '-filter_threads', '1', '-vf', filters, '-c:v', 'libx264', '-threads', '2', '-preset', preset, '-crf', '22',
-                   '-c:a', 'aac', '-b:a', '128k', '-af', 'aresample=async=1:first_pts=0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)]
-        try:
-            result = run_media(command, 600)
-            if result.returncode:
-                raise RuntimeError(media_error(result.stderr))
-            video, _ = validate_duration(output, length)
-            if (video['width'], video['height']) != (width, height):
-                raise RuntimeError('Unexpected output dimensions.')
-            log_fn(f'Validated vertical clip: {width}×{height}.')
-            return width, height
-        except (RuntimeError, ValueError) as exc:
-            errors.append(str(exc))
-            log_fn(f'{width}×{height} conversion failed: {exc}')
+        for layout in ('crop','fit'):
+            sizing = (f'scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}' if layout=='crop'
+                      else f'scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2')
+            filters = f'setpts=PTS-STARTPTS,fps=30,{sizing},setsar=1'
+            command = [get_ffmpeg_path(), '-hide_banner', '-loglevel', 'warning', '-nostdin', '-y', '-threads', '2',
+                       '-fflags', '+genpts', '-protocol_whitelist', 'file,pipe', '-i', str(raw), '-t', str(length), '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+                       '-filter_threads', '1', '-vf', filters, '-c:v', 'libx264', '-threads', '2', '-preset', preset, '-crf', '22',
+                       '-c:a', 'aac', '-b:a', '128k', '-af', 'asetpts=PTS-STARTPTS,aresample=async=1:first_pts=0', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(output)]
+            try:
+                result = run_media(command, 600)
+                if result.returncode:
+                    raise RuntimeError(media_error(result.stderr))
+                video, _ = validate_duration(output, length)
+                if (video['width'], video['height']) != (width, height):
+                    raise RuntimeError('Unexpected output dimensions.')
+                validate_picture(output,length)
+                log_fn(f'Validated visible video: {width}×{height}, {layout} layout.')
+                return width, height
+            except BlankVideoError as exc:
+                errors.append(str(exc))
+                if layout=='crop':
+                    log_fn('Center crop lost the visible picture; preserving the full image in a vertical frame…')
+                    continue
+            except (RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
+            log_fn(f'{width}×{height} conversion failed: {errors[-1]}')
+            break
     raise RuntimeError('Vertical conversion failed at both resolutions. No upload attempted. ' + errors[-1])

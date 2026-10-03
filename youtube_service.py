@@ -29,7 +29,7 @@ def parse_iso_duration(value):
     return int(sum(float(n or 0)*f for n, f in zip(match.groups(), (86400,3600,60,1)))) if match else 0
 
 
-from media_tools import get_ffmpeg_path, probe_video, download_clip_robustly, convert_vertical_clip, trim_local
+from media_tools import get_ffmpeg_path, probe_video, download_clip_robustly, convert_vertical_clip, trim_local, validate_picture, BlankVideoError
 
 
 def atomic_json(path, value):
@@ -67,6 +67,7 @@ class YouTubeService:
         self.history = self._load('clips_history.json', {})
         self.drafts = self._load('draft_queue.json', [])
         self.slot_retries = self._load('slot_retries.json', {})
+        self.source_scan_offsets = self._load('source_scan_offsets.json', {})
         self.replied_comments_map = self._load('replied_comments.json', {})
         defaults = dict(comments_reply=False, live_chat_reply=False, privacy_guard=False, auto_stream_select=False,
                         daily_shorts_count=3, post_mode='scheduled', posting_times='06:00, 11:00, 18:30',
@@ -196,6 +197,8 @@ class YouTubeService:
     def clear_source_retries(self, video_id):
         self.slot_retries = {k:v for k,v in self.slot_retries.items() if v.get('video_id') != video_id}
         self._save('slot_retries.json', self.slot_retries)
+        self.source_scan_offsets.pop(f'{self.channel_id}:{video_id}',None)
+        self._save('source_scan_offsets.json',self.source_scan_offsets)
 
     def get_detailed_analytics(self):
         if self.cached_analytics and time.time()-self.cached_analytics_time < 300:
@@ -469,6 +472,10 @@ class YouTubeService:
         return True
 
     def upload_video(self,file_path,title,description,tags,schedule_time=None,privacy='public',source=None):
+        video,duration = probe_video(file_path)
+        if abs(duration-30) > 1 or abs(video['width']/video['height']-9/16) > .01:
+            raise RuntimeError('Upload rejected: expected a complete 30-second vertical Short.')
+        validate_picture(file_path,30)
         status = {'privacyStatus':'private' if schedule_time else privacy}
         if schedule_time:
             status['publishAt'] = schedule_time
@@ -537,18 +544,35 @@ class YouTubeService:
             offset = max(0,int(self.history.get(video_id,0)))
             if offset + length > seconds:
                 offset = 0
+            scan_key = f'{self.channel_id}:{video_id}'
+            offset = max(offset,int(self.source_scan_offsets.get(scan_key,0)))
             part = int(self.history.get(f'part_{video_id}',0))+1
             recording = self.source_recording_path(video_id)
             report(1,10,'snipping','Cutting the saved recording…' if recording.is_file() else 'Downloading the selected source segment…')
             with tempfile.TemporaryDirectory(prefix='youtube-short-') as folder:
                 raw,out = str(Path(folder)/'source.mp4'),str(Path(folder)/'short.mp4')
                 ffmpeg = get_ffmpeg_path()
-                if recording.is_file():
-                    trim_local(recording,raw,offset,length,ffmpeg)
+                for attempt in range(4):
+                    if offset+length > seconds:
+                        raise RuntimeError('No complete visible segment remains in this recording. Select another source or upload its original recording in Settings → Source recordings.')
+                    if scheduled and scheduled <= dt.datetime.now(self.tz):
+                        raise RuntimeError('Scheduled time passed while checking source footage. Choose a later slot.')
+                    report(1,10,'snipping',f'Checking source footage at {offset//60:02d}:{offset%60:02d}…')
+                    if recording.is_file():
+                        trim_local(recording,raw,offset,length,ffmpeg)
+                    else:
+                        download_clip_robustly(f'https://www.youtube.com/watch?v={video_id}',offset,length,raw,ffmpeg,str(Path(ffmpeg).parent),log_fn)
+                    report(2,45,'converting','Converting and checking the actual video frames…')
+                    try:
+                        convert_vertical_clip(raw,out,length,log_fn)
+                        break
+                    except BlankVideoError:
+                        offset += length
+                        self.source_scan_offsets[scan_key] = offset
+                        self._save('source_scan_offsets.json',self.source_scan_offsets)
+                        log_fn('Blank source segment skipped. Checking the next 30 seconds…')
                 else:
-                    download_clip_robustly(f'https://www.youtube.com/watch?v={video_id}',offset,length,raw,ffmpeg,str(Path(ffmpeg).parent),log_fn)
-                report(2,45,'converting','Converting and validating the vertical clip…')
-                convert_vertical_clip(raw,out,length,log_fn)
+                    raise RuntimeError('The checked source segments are blank. No upload attempted. The next retry continues further into the recording; you can also select another source.')
                 report(3,70,'generating_ai','Generating metadata from the source title and description…')
                 metadata = ai_service.generate_deep_seo_metadata(source['snippet']['title'],offset//60,part,self.channel_name,source['snippet'].get('description',''))
                 if scheduled and scheduled <= dt.datetime.now(self.tz):
@@ -557,6 +581,8 @@ class YouTubeService:
                 report(4,85,'uploading','Uploading to YouTube…')
                 vid = self.upload_video(out,metadata['title'],metadata['description'],metadata['tags'],publish_at,'private' if action=='draft' else 'public',source)
                 uploaded_id = vid
+                self.source_scan_offsets.pop(scan_key,None)
+                self._save('source_scan_offsets.json',self.source_scan_offsets)
                 self.history[video_id] = offset+length if offset+2*length <= seconds else 0
                 self.history[f'part_{video_id}'] = part
                 if draft_key:

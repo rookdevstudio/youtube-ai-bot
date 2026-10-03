@@ -199,6 +199,8 @@ Railway bot வேலை செய்யத் தொடங்கியபிற
 
 **Gemini key ஒருமுறை போதும்:** paste → Load Models → model select → **Test & Save** வெற்றியானபின் மீண்டும் paste செய்ய வேண்டாம். Browser மீண்டும் திறந்தால் **API key saved — ready to use** மற்றும் model காட்டும். Key field-ல் actual secret காட்டாமல் saved indication தெரியும்; blank field பழைய key-ஐ வைத்துக்கொள்ளும்.
 
+**Blank Short தடுப்பு:** bot source மற்றும் final Short-ன் actual frames-ஐச் சரிபார்த்த பிறகே upload செய்யும். Black/white intro இருந்தால் அடுத்த 30-second பகுதியைத் தேர்ந்தெடுக்கும்; ஒரு முயற்சியில் அதிகபட்சம் 4 பகுதிகள். Restart ஆனாலும் scan இடம் save ஆகும். Center crop-ல் படம் மறைந்தால் முழுப் படத்தையும் vertical frame-ல் வைக்கும். Footage முழுவதும் blank இருந்தால் upload செய்யாது; வேறு source தேர்ந்தெடுக்கவும் அல்லது original recording save செய்யவும். ஏற்கனவே YouTube-ல் உள்ள video-வின் படத்தை இந்த update மாற்றாது.
+
 | Error / நிலை | சரிபார்க்க வேண்டியது |
 |---|---|
 | Dockerfile not found / build missing files | Repo root-ல் `Dockerfile`, Python files, requirements மற்றும் `templates` இருக்கிறதா? Parent `github-upload` folder-க்குள் மட்டும் upload ஆகிவிட்டதா? |

@@ -197,7 +197,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.02-scheduler-persistence'
+        result['release'] = '2026.10.03-visible-video-validation'
     return result
 
 
