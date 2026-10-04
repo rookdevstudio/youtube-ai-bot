@@ -203,6 +203,8 @@ Railway bot வேலை செய்யத் தொடங்கியபிற
 
 **Login-ல் `quotaExceeded` வந்தால்:** புதிய update-ல் bot dashboard மற்றும் Settings தொடர்ந்து திறக்கும். Google sign-in முடிந்து channel verification மட்டும் quota-வால் தடைப்பட்டால் authorization save ஆகும்; மீண்டும் login தேவையில்லை. Quota reset நேரத்தை error notice காட்டும்; அதன் பிறகு bot தானாக verification முயற்சிக்கும். அதுவரை YouTube API requests நிறுத்தப்படும்; saved times மற்றும் Gemini key மாறாது. பழைய error callback URL-ஐ refresh செய்வதற்குப் பதிலாக உங்கள் Railway domain-ஐ நேரடியாகத் திறக்கவும்.
 
+**Login முடிந்து library காலியாகத் தெரிந்தால்:** மேலே **channel data not loaded yet** மற்றும் உங்கள் local quota reset நேரம் தெரியும். Channel ready ஆனதும் page தானாக reload ஆகும்; மீண்டும் Google login தேவையில்லை. **Retry channel loading** மூலம் saved login-ஐச் சரிபார்க்கலாம்; 5 நிமிடத்திற்கு ஒரு முயற்சி. Google quota இன்னும் முடிந்திருந்தால் உண்மையான error தெரியும். Auto-Public-ன் முழு library refresh இப்போது 15-minute cache-ஐப் பயன்படுத்தும்; saved future schedules மாற்றப்படாது.
+
 | Error / நிலை | சரிபார்க்க வேண்டியது |
 |---|---|
 | Dockerfile not found / build missing files | Repo root-ல் `Dockerfile`, Python files, requirements மற்றும் `templates` இருக்கிறதா? Parent `github-upload` folder-க்குள் மட்டும் upload ஆகிவிட்டதா? |

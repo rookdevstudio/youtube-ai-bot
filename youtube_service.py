@@ -69,6 +69,7 @@ class YouTubeService:
         self.channel_name, self.last_error, self.errors = 'Not connected', '', {}
         self.cache_channel_id, self.cached_playlist_id = None, None
         self.cached_videos_data = {'live': [], 'videos': [], 'shorts': []}
+        self.library_loaded = False
         self.cached_videos_time, self.cached_analytics_time = 0, 0
         self.cached_analytics, self._cached_live_info, self._cached_live_time = None, None, 0
         self.comments_time, self.comments_data, self.live_chat_history = 0, [], []
@@ -90,6 +91,7 @@ class YouTubeService:
         if cache.get('channel_id') and isinstance(cache.get('data'), dict):
             self.cache_channel_id, self.cached_videos_data = cache['channel_id'], cache['data']
             self.cached_videos_time = cache.get('fetched_at', 0)
+            self.library_loaded = True
         if load_credentials:
             self.load_saved_credentials()
 
@@ -147,23 +149,29 @@ class YouTubeService:
         self.report_error('YouTube quota',error)
         raise error from exc
 
-    def _execute(self, request, client_id=None):
+    def _execute(self, request, client_id=None, quota_probe=False):
         with self.api_lock:
-            self.check_api_quota(client_id)
+            if not quota_probe:
+                self.check_api_quota(client_id)
             try:
-                return request.execute()
+                result = request.execute()
             except Exception as exc:
                 self.record_api_quota(exc,client_id)
+            return result
 
     @serialized
-    def connect(self, credentials):
+    def connect(self, credentials, quota_probe=False):
         with self.api_lock:
             transport = httplib2.Http(timeout=60)
             # HTTP 308 is the resumable upload acknowledgement, not a redirect.
             transport.redirect_codes = transport.redirect_codes - {308}
             client = build('youtube', 'v3', http=AuthorizedHttp(credentials, http=transport), cache_discovery=False)
             client_id = str(credentials.client_id or '')
-            result = self._execute(client.channels().list(part='id,snippet', mine=True),client_id=client_id)
+            result = self._execute(client.channels().list(part='id,snippet', mine=True),client_id=client_id,quota_probe=quota_probe)
+            if quota_probe and self.quota_state.get('client_id')==client_id:
+                self.quota_state = {}
+                self._save('youtube_quota.json',{})
+                self.errors.pop('YouTube quota',None)
             if not result.get('items'):
                 raise RuntimeError('Selected Google account has no YouTube channel. Reconnect with the correct channel.')
             channel = result['items'][0]
@@ -171,6 +179,7 @@ class YouTubeService:
             self.api_client_id = client_id
             if self.cache_channel_id != self.channel_id:
                 self.cached_videos_data, self.cached_videos_time = {'live': [], 'videos': [], 'shorts': []}, 0
+                self.library_loaded = False
             self.cache_channel_id = self.channel_id
             self.cached_analytics_time, self._cached_live_time, self.comments_time = 0, 0, 0
             self.cached_analytics, self._cached_live_info, self.comments_data = None, None, []
@@ -180,7 +189,7 @@ class YouTubeService:
             self.errors.pop('YouTube connection', None)
             self.last_error = ''
 
-    def load_saved_credentials(self):
+    def load_saved_credentials(self, quota_probe=False):
         if self._load('youtube_connection.json', {}).get('disconnected'):
             return
         try:
@@ -199,19 +208,32 @@ class YouTubeService:
                 if not credentials.refresh_token:
                     raise RuntimeError('YouTube login expired. Reconnect your channel.')
                 credentials.refresh(Request())
-            self.connect(credentials)
+            self.connect(credentials,quota_probe=quota_probe)
             self.save_credentials(credentials)
             pending.unlink(missing_ok=True)
+            return True
         except Exception as exc:
             self.youtube = None
             self.report_error('YouTube connection', exc)
             self.connection_retry_at = time.time()+300
             if isinstance(exc,YouTubeQuotaError):
+                self.connection_retry_at = self.quota_state.get('retry_at',self.connection_retry_at)
                 self.save_pending_credentials(credentials)
+            return False
 
     def save_pending_credentials(self, credentials):
         self._save('pending_youtube_token.json',json.loads(credentials.to_json()))
-        self._save('youtube_connection.json',{'disconnected':False})
+        self._save('youtube_connection.json',{**self._load('youtube_connection.json',{}),'disconnected':False})
+
+    @serialized
+    def retry_connection_now(self):
+        state = self._load('youtube_connection.json',{})
+        if state.get('disconnected') or not any((Path(self.base_dir)/name).exists() for name in ('pending_youtube_token.json','token.json','token.pickle')):
+            raise ValueError('Connect YouTube first; no saved Google authorization is available.')
+        if time.time()-state.get('last_probe_at',0) < 300:
+            raise ValueError('Channel verification was recently checked. Wait five minutes before retrying.')
+        self._save('youtube_connection.json',{**state,'last_probe_at':time.time()})
+        return self.load_saved_credentials(quota_probe=True)
 
     def retry_saved_connection(self):
         if self.youtube and not (Path(self.base_dir)/'pending_youtube_token.json').exists():
@@ -227,7 +249,7 @@ class YouTubeService:
 
     def save_credentials(self, credentials):
         self._save('token.json', json.loads(credentials.to_json()))
-        self._save('youtube_connection.json', {'disconnected': False})
+        self._save('youtube_connection.json', {**self._load('youtube_connection.json',{}),'disconnected': False})
 
     @serialized
     def disconnect(self):
@@ -235,6 +257,7 @@ class YouTubeService:
             self._save('youtube_connection.json', {'disconnected': True})
             self.youtube, self.channel_id, self.channel_name = None, None, 'Not connected'
             self.cached_videos_data = {'live': [], 'videos': [], 'shorts': []}
+            self.library_loaded = False
             self.cached_videos_time = self.cached_analytics_time = self._cached_live_time = self.comments_time = 0
             self.cached_analytics = self._cached_live_info = self.cached_playlist_id = None
             self.comments_data, self.live_chat_history, self.pending_live = [], [], []
@@ -271,7 +294,7 @@ class YouTubeService:
         self._save('source_scan_offsets.json',self.source_scan_offsets)
 
     def get_detailed_analytics(self):
-        if self.cached_analytics and time.time()-self.cached_analytics_time < 300:
+        if self.youtube and self.cache_channel_id==self.channel_id and self.cached_analytics and time.time()-self.cached_analytics_time < 300:
             return dict(self.cached_analytics, source='YouTube API (cached up to 5 minutes)')
         out = dict(name=self.channel_name, subscribers='Unavailable', views='Unavailable', videos='Unavailable', joined='Unavailable',
                    source='Unavailable', error='', live_count=0, vod_count=0, shorts_count=0)
@@ -295,6 +318,8 @@ class YouTubeService:
             self.errors.pop('Channel statistics', None)
         except Exception as exc:
             out['error'] = self.report_error('Channel statistics', exc)
+            if self.cached_analytics and self.cache_channel_id==self.channel_id:
+                return dict(self.cached_analytics,error=out['error'],source='Previously fetched YouTube data; live refresh unavailable')
         return out
 
     def get_categorized_channel_videos(self):
@@ -326,8 +351,9 @@ class YouTubeService:
                         views=f"{int(stats['viewCount']):,}" if 'viewCount' in stats else 'Unavailable',
                         likes=f"{int(stats['likeCount']):,}" if 'likeCount' in stats else 'Unavailable',
                         published_at=snip.get('publishedAt',''), thumbnail=snip.get('thumbnails',{}).get('medium',{}).get('url',''),
-                        privacy=item.get('status',{}).get('privacyStatus','unknown').upper(), is_live=snip.get('liveBroadcastContent')=='live'))
+                        privacy=item.get('status',{}).get('privacyStatus','unknown').upper(), publish_at=item.get('status',{}).get('publishAt',''), is_live=snip.get('liveBroadcastContent')=='live'))
             self.cached_videos_data, self.cached_videos_time = cats, time.time()
+            self.library_loaded = True
             self._save('cached_channel_videos.json',dict(channel_id=self.channel_id, fetched_at=self.cached_videos_time,data=cats))
             self.errors.pop('Video library',None)
         except Exception as exc:
@@ -783,11 +809,16 @@ class YouTubeService:
         """Publish non-public uploads and broadcasts when the user enables auto-public."""
         if not self.youtube or not self.settings.get('privacy_guard'):
             return
-        # Refresh so videos changed outside this bot are included. Uploads playlist
-        # covers Shorts, full videos and completed broadcasts, with pagination.
-        self.cached_videos_time = 0
+        # Use the shared 15-minute library cache. Invalidating it every two
+        # minutes consumed the daily quota for channels with many uploads.
         cats = self.get_categorized_channel_videos()
-        ids = {v['id'] for items in cats.values() for v in items if v.get('privacy') != 'PUBLIC'}
+        def future_scheduled(video):
+            try:
+                return bool(video.get('publish_at') and dt.datetime.fromisoformat(video['publish_at'].replace('Z','+00:00'))>dt.datetime.now(UTC))
+            except (ValueError,TypeError):
+                return False
+        ids = {v['id'] for items in cats.values() for v in items if v.get('privacy') != 'PUBLIC' and not future_scheduled(v)}
+        changed = False
         for state in ('active', 'upcoming'):
             page = None
             while True:
@@ -811,10 +842,12 @@ class YouTubeService:
                 if result.get('status',{}).get('privacyStatus') != 'public':
                     raise RuntimeError('YouTube did not confirm public visibility; check restrictions in Studio.')
                 log_fn(f'Auto-public confirmed: {video_id}')
+                changed = True
                 self.errors.pop('Auto-public '+video_id,None)
             except Exception as exc:
                 log_fn(self.report_error('Auto-public '+video_id,exc))
-        self.cached_videos_time = self.cached_analytics_time = self._cached_live_time = 0
+        if changed:
+            self.cached_videos_time = self.cached_analytics_time = self._cached_live_time = 0
 
     def boost_video_seo(self,video_id,ai_service,log_fn=print):
         if not ai_service:

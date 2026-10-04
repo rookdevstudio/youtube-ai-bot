@@ -90,7 +90,7 @@
         <span>💬</span> Live Chat &amp; 24h Comments Hub
       </button>
       <button onclick="switchMainTab('library')" id="tabNav-library" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0">
-        <span>🎬</span> Media Library ({{ total_uploads_count }} loaded)
+        <span>🎬</span> Media Library ({{ (total_uploads_count|string) + ' loaded' if channel_library_ready else 'not loaded yet' }})
       </button>
       <button onclick="switchMainTab('scheduler')" id="tabNav-scheduler" class="main-tab-nav bg-slate-900 hover:bg-slate-800 text-slate-300 font-bold text-xs px-4 py-2 rounded-xl border border-slate-800 transition flex items-center gap-1.5 flex-shrink-0">
         <span>⏰</span> Scheduler &amp; 1-Hour Drafts
@@ -113,7 +113,11 @@
         <a href="/auth/youtube" class="px-3 py-2 bg-red-600 rounded-lg">Connect / Reconnect YouTube</a>
         <form action="/logout" method="post"><button class="px-3 py-2 bg-slate-700 rounded-lg">Sign out</button></form>
       </div>
-      {% if youtube_pending %}<p class="text-amber-300">Google sign-in saved. YouTube channel verification is waiting for API quota reset and will retry automatically. You can use bot settings now; no need to sign in again.</p>{% endif %}
+      <div id="channelLoadNotice" class="{{ 'hidden' if channel_library_ready else '' }} rounded-xl border border-amber-500/40 bg-amber-950/30 p-4">
+        <p id="channelLoadMessage" class="text-amber-200">{% if youtube_pending %}Google sign-in saved. Your channel data has not loaded yet.{% elif yt_connected %}YouTube is connected; the video library has not loaded yet.{% else %}Connect YouTube in Settings to load your channel.{% endif %}</p>
+        <p id="channelRetryTime" class="text-sm text-amber-300 mt-2">{% if channel_retry_at %}YouTube quota reset: {{ channel_retry_at | local_schedule_time }} ({{ timezone }}). Verification retries automatically; this page will reload when your channel is ready.{% endif %}</p>
+        <button id="retryYouTubeButton" type="button" class="{{ '' if youtube_pending or yt_connected else 'hidden' }} mt-3 rounded-lg bg-amber-700 px-3 py-2 text-sm" onclick="retryYouTubeConnection()">Retry channel loading</button>
+      </div>
       {% if analytics.error %}<p class="text-amber-300">{{ analytics.error }}</p>{% endif %}
       {% for error in errors %}<p class="text-amber-300">{{ error }}</p>{% endfor %}
       <p class="text-xs text-slate-400">API data may be cached (statistics: 5 minutes, library: 15 minutes). Short candidates are inferred from duration, dimensions or #Shorts; YouTube does not expose a definitive Shorts flag here.</p>
@@ -314,7 +318,7 @@
           <div class="glass-card p-5 rounded-2xl">
             <p class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Public Video Count</p>
             <h3 class="text-2xl sm:text-3xl font-black mt-1.5 text-indigo-400 font-mono">{{ analytics.videos }}</h3>
-            <span class="text-[10px] text-indigo-300 font-medium mt-1 inline-block">{{ total_uploads_count }} videos loaded (including non-public uploads)</span>
+            <span class="text-[10px] text-indigo-300 font-medium mt-1 inline-block">{{ (total_uploads_count|string) + ' videos loaded (including non-public uploads)' if channel_library_ready else 'Video library not loaded yet — see connection status above' }}</span>
           </div>
 
           <div class="glass-card p-5 rounded-2xl">
@@ -560,7 +564,7 @@
         <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-white/[0.06] pb-3">
           <div>
             <h2 class="text-lg font-bold text-white flex items-center gap-2">
-              <span>🎬</span> Channel Media Library ({{ total_uploads_count }} loaded)
+              <span>🎬</span> Channel Media Library ({{ (total_uploads_count|string) + ' loaded' if channel_library_ready else 'not loaded yet' }})
             </h2>
             <p class="text-xs text-slate-400">Pick any live stream or video below to snip a 30s Short instantly or schedule it!</p>
           </div>
@@ -979,7 +983,7 @@
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section class="glass-card p-6 rounded-3xl space-y-4">
           <h3 class="font-bold text-lg">YouTube account</h3>
-          <p id="youtubeConnectionLabel" class="text-sm text-slate-300">{{ 'Google sign-in saved; YouTube verification waiting for quota reset.' if youtube_pending else ('Connected: ' + channel_name if yt_connected else 'YouTube is not connected.') }}</p>
+          <p id="youtubeConnectionLabel" class="text-sm text-slate-300">{{ 'Google sign-in saved; channel verification pending.' if youtube_pending else ('Connected: ' + channel_name if yt_connected else 'YouTube is not connected.') }}</p>
           <div class="flex flex-wrap gap-3">
             <a id="youtubeConnectButton" href="/auth/youtube" class="rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold">Connect YouTube</a>
             <form action="/api/settings/disconnect-youtube" method="post" data-connection-form>
@@ -1449,16 +1453,49 @@
         message.textContent = error.message + (saved ? ' Your saved key/model are unchanged; no need to paste again.' : '');
       } finally { if (version === modelListVersion) button.disabled = false; }
     }
+    const displayedChannelId = {{ (channel_id if yt_connected else '') | tojson }};
+    const displayedLibraryReady = {{ channel_library_ready | tojson }};
+    let channelReloadRequested = false;
+    let displayedSourceIds = null;
+    function shouldReloadChannel(status) {
+      return Boolean(status.youtube_connected && status.channel_id &&
+        (status.channel_id !== displayedChannelId || (!displayedLibraryReady && status.library_ready)));
+    }
+    async function retryYouTubeConnection() {
+      const button = document.getElementById('retryYouTubeButton');
+      const message = document.getElementById('channelLoadMessage');
+      button.disabled = true;
+      message.textContent = 'Checking saved Google sign-in and channel access…';
+      try {
+        await readResponse(await fetch('/api/settings/retry-youtube', {method:'POST'}));
+        window.location.reload();
+      } catch (error) {
+        message.textContent = error.message;
+        await refreshConnections();
+      } finally { button.disabled = false; }
+    }
     async function refreshConnections() {
       try {
         const status = await readResponse(await fetch('/api/settings/status'));
-        document.getElementById('youtubeConnectionLabel').textContent = status.youtube_pending ? 'Google sign-in saved; YouTube verification waiting for quota reset.' : (status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.');
+        if (!channelReloadRequested && shouldReloadChannel(status)) {
+          channelReloadRequested = true;
+          window.location.reload();
+          return;
+        }
+        document.getElementById('channelLoadNotice').classList.toggle('hidden', Boolean(status.youtube_connected && status.library_ready));
+        document.getElementById('channelRetryTime').textContent = status.retry_at ? 'YouTube quota reset: ' + new Date(status.retry_at).toLocaleString('en-IN', {timeZone:{{ timezone | tojson }}}) + ' (' + {{ timezone | tojson }} + '). This page reloads automatically when the channel is ready.' : '';
+        document.getElementById('retryYouTubeButton').classList.toggle('hidden', !status.youtube_pending && !status.youtube_connected);
+        document.getElementById('youtubeConnectionLabel').textContent = status.youtube_pending ? 'Google sign-in saved; channel verification pending.' : (status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.');
         document.getElementById('youtubeConnectButton').textContent = status.youtube_connected ? 'Reconnect / Change channel' : 'Connect YouTube';
         document.getElementById('youtubeDisconnectButton').classList.toggle('hidden', !status.youtube_connected && !status.youtube_pending);
         document.getElementById('geminiConnectionLabel').textContent = status.ai_configured ? 'API key saved — ready to use. Model: ' + status.model : 'No Gemini key saved yet.';
         document.querySelector('input[name=api_key]').placeholder = status.ai_configured ? 'Saved key •••••••• — paste only to replace' : 'Paste key once, then Test & Save';
         document.getElementById('sourceRecordingStatus').textContent = status.saved_source_ids.length + ' recording(s) saved for this channel.';
-        document.getElementById('savedSourceSelect').replaceChildren(new Option('Select saved recording', ''), ...status.saved_source_ids.map(id => new Option(id,id)));
+        const sourceIds = JSON.stringify(status.saved_source_ids);
+        if (sourceIds !== displayedSourceIds) {
+          document.getElementById('savedSourceSelect').replaceChildren(new Option('Select saved recording', ''), ...status.saved_source_ids.map(id => new Option(id,id)));
+          displayedSourceIds = sourceIds;
+        }
         savedGeminiModel = status.model;
         if (!modelListInitialized && status.ai_configured && !document.querySelector('input[name=api_key]').value) {
           modelListInitialized = true;
@@ -1540,6 +1577,7 @@
       const selected = location.hash.slice(1);
       switchMainTab(selected === 'commentsHubSection' ? 'comments' : ['settings','scheduler','library','all'].includes(selected) ? selected : 'overview');
       refreshConnections();
+      setInterval(refreshConnections, 30000);
       refreshSchedulerStatus();
       setInterval(refreshSchedulerStatus, 30000);
     });

@@ -198,7 +198,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.04-quota-safe-login-r2'
+        result['release'] = '2026.10.04-channel-loading'
     return result
 
 
@@ -211,9 +211,22 @@ def favicon():
 def connection_status():
     return dict(youtube_connected=bool(yt_service.youtube and yt_service.channel_id),
                 youtube_pending=(Path(yt_service.base_dir)/'pending_youtube_token.json').exists(),
+                channel_id=yt_service.channel_id or '',
+                library_ready=bool(yt_service.youtube and yt_service.channel_id and yt_service.cache_channel_id==yt_service.channel_id and yt_service.library_loaded),
+                retry_at=dt.datetime.fromtimestamp(yt_service.quota_state['retry_at'],yt_service.tz).isoformat() if yt_service.quota_state.get('retry_at',0)>time.time() else '',
+                connection_error=yt_service.errors.get('YouTube connection',''),
                 channel_name=yt_service.channel_name,ai_configured=bool(ai_service),
                 model=ai_service.model if ai_service else os.getenv('GEMINI_MODEL','gemini-3.5-flash'),
                 saved_source_ids=yt_service.saved_source_ids())
+
+
+@app.post('/api/settings/retry-youtube')
+def retry_youtube_connection():
+    with configuration_change():
+        if not yt_service.retry_connection_now():
+            return JSONResponse({'status':'error','error':yt_service.last_error or 'Channel verification is still unavailable.'},status_code=409)
+    add_log('Saved Google authorization verified; channel is ready.')
+    return {'status':'ok','message':'YouTube channel verified. Loading channel data…'}
 
 
 @app.post('/api/settings/source-recording')
@@ -387,6 +400,7 @@ def auth_callback(request:Request,state:str='',code:str='',error:str=''):
         try:
             yt_service.connect(flow.credentials)
         except YouTubeQuotaError as exc:
+            yt_service.youtube = None
             yt_service.save_pending_credentials(flow.credentials)
             add_log(yt_service.report_error('YouTube connection',exc))
         else:
@@ -419,6 +433,8 @@ def index(request:Request):
     return templates.TemplateResponse(request=request,name='index.html',context=dict(
         yt_connected=bool(yt_service.youtube and yt_service.channel_id),ai_configured=bool(ai_service),
         youtube_pending=(Path(yt_service.base_dir)/'pending_youtube_token.json').exists(),
+        channel_library_ready=bool(yt_service.youtube and yt_service.channel_id and yt_service.cache_channel_id==yt_service.channel_id and yt_service.library_loaded),
+        channel_retry_at=dt.datetime.fromtimestamp(yt_service.quota_state['retry_at'],yt_service.tz).isoformat() if yt_service.quota_state.get('retry_at',0)>time.time() else '',
         automation_running=scheduler.running and yt_service.settings.get('automation_enabled'),channel_id=yt_service.channel_id,channel_name=yt_service.channel_name,
         ai_model=ai_service.model if ai_service else '',saved_source_ids=yt_service.saved_source_ids(),
         source_videos=[v for category in ('videos','live') for v in categorized[category] if not v.get('is_live') and parse_iso_duration(v.get('duration'))>=30],

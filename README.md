@@ -54,6 +54,8 @@ In **Settings → Gemini AI**, paste once, load models, select one and **Test & 
 
 Admin login and the dashboard remain available when YouTube returns a daily quota error. If Google authorization succeeds but channel verification cannot run, the bot saves a pending authorization and redirects to Settings instead of an error JSON page. It does not use that authorization for a channel until verification succeeds. Daily quota failures pause API requests until the next midnight Pacific reset plus one minute, including across restarts. Channel verification retries automatically without another Google sign-in; pausing automation still leaves login recovery enabled. Statistics that cannot be loaded show Unavailable, and quota does not clear saved posting times or Gemini settings.
 
+An unloaded channel/library is shown as **not loaded yet**, with the local quota reset time. The page checks connection state every 30 seconds and reloads once when verification or library loading completes, preserving the active tab. **Retry channel loading** checks the saved authorization without another Google login; one manual verification is allowed every five minutes, even if the local cooldown is active. Only a real successful channel response clears that cooldown; this cannot bypass Google's quota. Auto-Public reuses the shared 15-minute library cache, skips known future scheduled uploads and invalidates the cache after an actual visibility change, avoiding a full-channel scan every two minutes. Existing cached statistics are labelled as previously fetched when live refresh fails.
+
 ## Verification
 
 Run from this folder:
