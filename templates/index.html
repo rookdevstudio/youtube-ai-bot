@@ -113,6 +113,7 @@
         <a href="/auth/youtube" class="px-3 py-2 bg-red-600 rounded-lg">Connect / Reconnect YouTube</a>
         <form action="/logout" method="post"><button class="px-3 py-2 bg-slate-700 rounded-lg">Sign out</button></form>
       </div>
+      {% if youtube_pending %}<p class="text-amber-300">Google sign-in saved. YouTube channel verification is waiting for API quota reset and will retry automatically. You can use bot settings now; no need to sign in again.</p>{% endif %}
       {% if analytics.error %}<p class="text-amber-300">{{ analytics.error }}</p>{% endif %}
       {% for error in errors %}<p class="text-amber-300">{{ error }}</p>{% endfor %}
       <p class="text-xs text-slate-400">API data may be cached (statistics: 5 minutes, library: 15 minutes). Short candidates are inferred from duration, dimensions or #Shorts; YouTube does not expose a definitive Shorts flag here.</p>
@@ -978,11 +979,11 @@
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <section class="glass-card p-6 rounded-3xl space-y-4">
           <h3 class="font-bold text-lg">YouTube account</h3>
-          <p id="youtubeConnectionLabel" class="text-sm text-slate-300">Checking connection…</p>
+          <p id="youtubeConnectionLabel" class="text-sm text-slate-300">{{ 'Google sign-in saved; YouTube verification waiting for quota reset.' if youtube_pending else ('Connected: ' + channel_name if yt_connected else 'YouTube is not connected.') }}</p>
           <div class="flex flex-wrap gap-3">
             <a id="youtubeConnectButton" href="/auth/youtube" class="rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold">Connect YouTube</a>
             <form action="/api/settings/disconnect-youtube" method="post" data-connection-form>
-              <button id="youtubeDisconnectButton" type="submit" class="hidden rounded-xl border border-slate-600 px-4 py-3 text-sm">Disconnect YouTube</button>
+              <button id="youtubeDisconnectButton" type="submit" class="{{ '' if yt_connected or youtube_pending else 'hidden' }} rounded-xl border border-slate-600 px-4 py-3 text-sm">Disconnect YouTube</button>
             </form>
           </div>
           <p class="text-xs text-slate-400">Disconnect stops this bot from using your channel. Sign out in the header only logs you out of this dashboard.</p>
@@ -1451,9 +1452,9 @@
     async function refreshConnections() {
       try {
         const status = await readResponse(await fetch('/api/settings/status'));
-        document.getElementById('youtubeConnectionLabel').textContent = status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.';
+        document.getElementById('youtubeConnectionLabel').textContent = status.youtube_pending ? 'Google sign-in saved; YouTube verification waiting for quota reset.' : (status.youtube_connected ? 'Connected: ' + status.channel_name : 'YouTube is not connected.');
         document.getElementById('youtubeConnectButton').textContent = status.youtube_connected ? 'Reconnect / Change channel' : 'Connect YouTube';
-        document.getElementById('youtubeDisconnectButton').classList.toggle('hidden', !status.youtube_connected);
+        document.getElementById('youtubeDisconnectButton').classList.toggle('hidden', !status.youtube_connected && !status.youtube_pending);
         document.getElementById('geminiConnectionLabel').textContent = status.ai_configured ? 'API key saved — ready to use. Model: ' + status.model : 'No Gemini key saved yet.';
         document.querySelector('input[name=api_key]').placeholder = status.ai_configured ? 'Saved key •••••••• — paste only to replace' : 'Paste key once, then Test & Save';
         document.getElementById('sourceRecordingStatus').textContent = status.saved_source_ids.length + ' recording(s) saved for this channel.';

@@ -201,6 +201,8 @@ Railway bot வேலை செய்யத் தொடங்கியபிற
 
 **Blank Short தடுப்பு:** bot source மற்றும் final Short-ன் actual frames-ஐச் சரிபார்த்த பிறகே upload செய்யும். Black/white intro இருந்தால் அடுத்த 30-second பகுதியைத் தேர்ந்தெடுக்கும்; ஒரு முயற்சியில் அதிகபட்சம் 4 பகுதிகள். Restart ஆனாலும் scan இடம் save ஆகும். Center crop-ல் படம் மறைந்தால் முழுப் படத்தையும் vertical frame-ல் வைக்கும். Footage முழுவதும் blank இருந்தால் upload செய்யாது; வேறு source தேர்ந்தெடுக்கவும் அல்லது original recording save செய்யவும். ஏற்கனவே YouTube-ல் உள்ள video-வின் படத்தை இந்த update மாற்றாது.
 
+**Login-ல் `quotaExceeded` வந்தால்:** புதிய update-ல் bot dashboard மற்றும் Settings தொடர்ந்து திறக்கும். Google sign-in முடிந்து channel verification மட்டும் quota-வால் தடைப்பட்டால் authorization save ஆகும்; மீண்டும் login தேவையில்லை. Quota reset நேரத்தை error notice காட்டும்; அதன் பிறகு bot தானாக verification முயற்சிக்கும். அதுவரை YouTube API requests நிறுத்தப்படும்; saved times மற்றும் Gemini key மாறாது. பழைய error callback URL-ஐ refresh செய்வதற்குப் பதிலாக உங்கள் Railway domain-ஐ நேரடியாகத் திறக்கவும்.
+
 | Error / நிலை | சரிபார்க்க வேண்டியது |
 |---|---|
 | Dockerfile not found / build missing files | Repo root-ல் `Dockerfile`, Python files, requirements மற்றும் `templates` இருக்கிறதா? Parent `github-upload` folder-க்குள் மட்டும் upload ஆகிவிட்டதா? |

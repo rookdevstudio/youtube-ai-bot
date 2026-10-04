@@ -22,3 +22,5 @@ source_recordings/
 slot_retries.json
 source_scan_offsets.json
 blank-diagnostics/
+youtube_quota.json
+pending_youtube_token.json

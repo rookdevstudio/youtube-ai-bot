@@ -24,6 +24,17 @@ SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl', 'https://www.goog
 UTC = dt.timezone.utc
 
 
+class YouTubeQuotaError(RuntimeError):
+    """Daily API quota is exhausted; local login and settings remain usable."""
+
+
+def api_error_reason(exc):
+    try:
+        return json.loads(exc.content).get('error',{}).get('errors',[{}])[0].get('reason','')
+    except (AttributeError,ValueError,TypeError,IndexError):
+        return ''
+
+
 def parse_iso_duration(value):
     match = re.fullmatch(r'P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?', value or '')
     return int(sum(float(n or 0)*f for n, f in zip(match.groups(), (86400,3600,60,1)))) if match else 0
@@ -68,6 +79,8 @@ class YouTubeService:
         self.drafts = self._load('draft_queue.json', [])
         self.slot_retries = self._load('slot_retries.json', {})
         self.source_scan_offsets = self._load('source_scan_offsets.json', {})
+        self.quota_state = self._load('youtube_quota.json', {})
+        self.api_client_id, self.connection_retry_at = '', 0
         self.replied_comments_map = self._load('replied_comments.json', {})
         defaults = dict(comments_reply=False, live_chat_reply=False, privacy_guard=False, auto_stream_select=False,
                         daily_shorts_count=3, post_mode='scheduled', posting_times='06:00, 11:00, 18:30',
@@ -99,6 +112,8 @@ class YouTubeService:
             except (ValueError, TypeError):
                 pass
         detail = f'HTTP {status} {reason}' if status else str(exc)
+        if reason in ('quotaExceeded','dailyLimitExceeded'):
+            detail = 'YouTube API daily quota reached. Bot login and settings remain available; YouTube actions must wait for quota reset.'
         if reason == 'uploadLimitExceeded':
             detail = 'YouTube channel upload limit reached (uploadLimitExceeded). No new video was accepted. Wait for the channel limit to reset; check YouTube Studio feature eligibility before retrying.'
         detail = re.sub(r'AIza[\w-]+', '[redacted]', re.sub(r'https?://\S+', '[URL]', detail))
@@ -106,9 +121,39 @@ class YouTubeService:
         self.errors[area] = self.last_error
         return self.last_error
 
-    def _execute(self, request):
+    def quota_message(self):
+        reset = dt.datetime.fromtimestamp(self.quota_state['retry_at'],self.tz)
+        return f'YouTube API daily quota reached. Bot and settings remain available. YouTube actions will retry after {reset:%d %b %Y, %H:%M} ({self.tz}).'
+
+    def check_api_quota(self, client_id=None):
+        project = self.api_client_id if client_id is None else client_id
+        if self.quota_state.get('client_id','') != project:
+            return
+        if self.quota_state.get('retry_at',0) > time.time():
+            raise YouTubeQuotaError(self.quota_message())
+        if self.quota_state:
+            self.quota_state = {}
+            self._save('youtube_quota.json',{})
+            self.errors.pop('YouTube quota',None)
+
+    def record_api_quota(self, exc, client_id=None):
+        if getattr(getattr(exc,'resp',None),'status',None) not in (403,429) or api_error_reason(exc) not in ('quotaExceeded','dailyLimitExceeded'):
+            raise exc
+        pacific = dt.datetime.now(ZoneInfo('America/Los_Angeles'))
+        reset = dt.datetime.combine(pacific.date()+dt.timedelta(days=1),dt.time(),tzinfo=pacific.tzinfo)+dt.timedelta(minutes=1)
+        self.quota_state = dict(retry_at=reset.timestamp(),client_id=self.api_client_id if client_id is None else client_id)
+        self._save('youtube_quota.json',self.quota_state)
+        error = YouTubeQuotaError(self.quota_message())
+        self.report_error('YouTube quota',error)
+        raise error from exc
+
+    def _execute(self, request, client_id=None):
         with self.api_lock:
-            return request.execute()
+            self.check_api_quota(client_id)
+            try:
+                return request.execute()
+            except Exception as exc:
+                self.record_api_quota(exc,client_id)
 
     @serialized
     def connect(self, credentials):
@@ -117,11 +162,13 @@ class YouTubeService:
             # HTTP 308 is the resumable upload acknowledgement, not a redirect.
             transport.redirect_codes = transport.redirect_codes - {308}
             client = build('youtube', 'v3', http=AuthorizedHttp(credentials, http=transport), cache_discovery=False)
-            result = client.channels().list(part='id,snippet', mine=True).execute()
+            client_id = str(credentials.client_id or '')
+            result = self._execute(client.channels().list(part='id,snippet', mine=True),client_id=client_id)
             if not result.get('items'):
                 raise RuntimeError('Selected Google account has no YouTube channel. Reconnect with the correct channel.')
             channel = result['items'][0]
             self.youtube, self.channel_id, self.channel_name = client, channel['id'], channel['snippet']['title']
+            self.api_client_id = client_id
             if self.cache_channel_id != self.channel_id:
                 self.cached_videos_data, self.cached_videos_time = {'live': [], 'videos': [], 'shorts': []}, 0
             self.cache_channel_id = self.channel_id
@@ -137,7 +184,10 @@ class YouTubeService:
         if self._load('youtube_connection.json', {}).get('disconnected'):
             return
         try:
+            pending = Path(self.base_dir)/'pending_youtube_token.json'
             token, legacy = Path(self.base_dir)/'token.json', Path(self.base_dir)/'token.pickle'
+            if pending.exists():
+                token = pending
             if token.exists():
                 credentials = Credentials.from_authorized_user_file(str(token))
             elif legacy.exists():
@@ -151,9 +201,29 @@ class YouTubeService:
                 credentials.refresh(Request())
             self.connect(credentials)
             self.save_credentials(credentials)
+            pending.unlink(missing_ok=True)
         except Exception as exc:
             self.youtube = None
             self.report_error('YouTube connection', exc)
+            self.connection_retry_at = time.time()+300
+            if isinstance(exc,YouTubeQuotaError):
+                self.save_pending_credentials(credentials)
+
+    def save_pending_credentials(self, credentials):
+        self._save('pending_youtube_token.json',json.loads(credentials.to_json()))
+        self._save('youtube_connection.json',{'disconnected':False})
+
+    def retry_saved_connection(self):
+        if self.youtube and not (Path(self.base_dir)/'pending_youtube_token.json').exists():
+            return
+        if time.time() < max(self.connection_retry_at,self.quota_state.get('retry_at',0)):
+            return
+        if not self.creation_lock.acquire(blocking=False):
+            return
+        try:
+            self.load_saved_credentials()
+        finally:
+            self.creation_lock.release()
 
     def save_credentials(self, credentials):
         self._save('token.json', json.loads(credentials.to_json()))
@@ -170,7 +240,7 @@ class YouTubeService:
             self.comments_data, self.live_chat_history, self.pending_live = [], [], []
             self.chat_id, self.chat_page = None, None
             self.errors.clear()
-            for name in ('token.json', 'token.pickle'):
+            for name in ('token.json', 'token.pickle','pending_youtube_token.json'):
                 (Path(self.base_dir)/name).unlink(missing_ok=True)
 
     @serialized
@@ -472,6 +542,7 @@ class YouTubeService:
         return True
 
     def upload_video(self,file_path,title,description,tags,schedule_time=None,privacy='public',source=None):
+        self.check_api_quota()
         video,duration = probe_video(file_path)
         if abs(duration-30) > 1 or abs(video['width']/video['height']-9/16) > .01:
             raise RuntimeError('Upload rejected: expected a complete 30-second vertical Short.')
@@ -489,7 +560,13 @@ class YouTubeService:
         try:
             with self.api_lock:
                 while response is None:
-                    _,response = request.next_chunk(num_retries=2)
+                    try:
+                        self.check_api_quota()
+                        _,response = request.next_chunk(num_retries=2)
+                    except Exception as exc:
+                        if isinstance(exc,YouTubeQuotaError):
+                            raise
+                        self.record_api_quota(exc)
         finally:
             media.stream().close()
         if not response.get('id'):

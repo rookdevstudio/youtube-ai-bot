@@ -17,7 +17,7 @@ from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.background import BackgroundScheduler
 from google_auth_oauthlib.flow import Flow
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-from youtube_service import YouTubeService, SCOPES
+from youtube_service import YouTubeService, SCOPES, YouTubeQuotaError
 from ai_service import AIService
 from settings_store import update_environment
 from runtime_config import load_runtime_environment, settings_environment_path
@@ -82,6 +82,7 @@ def fast_live_chat_engine():
 
 
 def periodic_engine():
+    run_safely('YouTube connection',yt_service.retry_saved_connection)
     if not yt_service.settings.get('automation_enabled'):
         return
     for label,fn,args in (
@@ -197,7 +198,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.03-visible-video-validation'
+        result['release'] = '2026.10.04-quota-safe-login'
     return result
 
 
@@ -209,6 +210,7 @@ def favicon():
 @app.get('/api/settings/status')
 def connection_status():
     return dict(youtube_connected=bool(yt_service.youtube and yt_service.channel_id),
+                youtube_pending=(Path(yt_service.base_dir)/'pending_youtube_token.json').exists(),
                 channel_name=yt_service.channel_name,ai_configured=bool(ai_service),
                 model=ai_service.model if ai_service else os.getenv('GEMINI_MODEL','gemini-3.5-flash'),
                 saved_source_ids=yt_service.saved_source_ids())
@@ -382,8 +384,14 @@ def auth_callback(request:Request,state:str='',code:str='',error:str=''):
     flow = entry[0]
     flow.fetch_token(code=code)
     with configuration_change():
-        yt_service.connect(flow.credentials)
-        yt_service.save_credentials(flow.credentials)
+        try:
+            yt_service.connect(flow.credentials)
+        except YouTubeQuotaError as exc:
+            yt_service.save_pending_credentials(flow.credentials)
+            add_log(yt_service.report_error('YouTube connection',exc))
+        else:
+            yt_service.save_credentials(flow.credentials)
+            (Path(yt_service.base_dir)/'pending_youtube_token.json').unlink(missing_ok=True)
     if ai_service:
         ai_service.cached_growth_plan = None
     response = RedirectResponse('/#settings',status_code=303)
@@ -393,13 +401,24 @@ def auth_callback(request:Request,state:str='',code:str='',error:str=''):
 
 @app.get('/',response_class=HTMLResponse)
 def index(request:Request):
-    analytics = yt_service.get_detailed_analytics()
-    categorized = yt_service.get_categorized_channel_videos()
+    def read_panel(area,fn,fallback):
+        try:
+            return fn()
+        except Exception as exc:
+            add_log(yt_service.report_error(area,exc))
+            return fallback
+    analytics = read_panel('Channel statistics',yt_service.get_detailed_analytics,
+        dict(name=yt_service.channel_name,subscribers='Unavailable',views='Unavailable',videos='Unavailable',joined='Unavailable',source='Unavailable',error='Channel data temporarily unavailable.'))
+    categorized = read_panel('Video library',yt_service.get_categorized_channel_videos,
+        yt_service.cached_videos_data if yt_service.youtube and yt_service.channel_id==yt_service.cache_channel_id else {'live':[],'videos':[],'shorts':[]})
     combined = [v for items in categorized.values() for v in items]
     growth = ai_service.cached_growth_plan if ai_service and ai_service.cached_growth_plan else dict(detected_niche='Not analyzed',health_score='Not measured',ideas=[])
-    comments = yt_service.get_recent_comments_2days()
+    comments = read_panel('Comments',yt_service.get_recent_comments_2days,
+        dict(all=[],comments=[],videos=[],shorts=[],live=[],live_finished=[],stats=dict(total=0,replied=0,pending=0),
+             active_stream_title='Unavailable',live_chat_active=False,live_viewers=None,live_likes=None,live_chat_history=[]))
     return templates.TemplateResponse(request=request,name='index.html',context=dict(
         yt_connected=bool(yt_service.youtube and yt_service.channel_id),ai_configured=bool(ai_service),
+        youtube_pending=(Path(yt_service.base_dir)/'pending_youtube_token.json').exists(),
         automation_running=scheduler.running and yt_service.settings.get('automation_enabled'),channel_id=yt_service.channel_id,channel_name=yt_service.channel_name,
         ai_model=ai_service.model if ai_service else '',saved_source_ids=yt_service.saved_source_ids(),
         source_videos=[v for category in ('videos','live') for v in categorized[category] if not v.get('is_live') and parse_iso_duration(v.get('duration'))>=30],

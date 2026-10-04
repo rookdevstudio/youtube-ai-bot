@@ -52,6 +52,8 @@ In **Settings → Source recordings**, select the matching completed channel vid
 
 In **Settings → Gemini AI**, paste once, load models, select one and **Test & Save**. Reopening the page shows **API key saved — ready to use** and the selected model. The actual key stays hidden on the server; blank input retains it. A failed catalogue refresh does not erase the saved model. Gemini quota and YouTube permission/upload limits still apply.
 
+Admin login and the dashboard remain available when YouTube returns a daily quota error. If Google authorization succeeds but channel verification cannot run, the bot saves a pending authorization and redirects to Settings instead of an error JSON page. It does not use that authorization for a channel until verification succeeds. Daily quota failures pause API requests until the next midnight Pacific reset plus one minute, including across restarts. Channel verification retries automatically without another Google sign-in; pausing automation still leaves login recovery enabled. Statistics that cannot be loaded show Unavailable, and quota does not clear saved posting times or Gemini settings.
+
 ## Verification
 
 Run from this folder:
