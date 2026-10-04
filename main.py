@@ -198,7 +198,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.04-quota-safe-login'
+        result['release'] = '2026.10.04-quota-safe-login-r2'
     return result
 
 
@@ -575,7 +575,9 @@ def scheduler_status():
     blockers = []
     if not running: blockers.append('Automation paused. Choose Running and Save & Apply.')
     if not settings.get('auto_stream_select'): blockers.append('Automatic Shorts Creation is OFF.')
-    if not yt_service.youtube: blockers.append('Connect YouTube in Settings.')
+    if not yt_service.youtube:
+        pending = (Path(yt_service.base_dir)/'pending_youtube_token.json').exists()
+        blockers.append('Google sign-in saved. YouTube channel verification will retry after quota reset.' if pending else 'Connect YouTube in Settings.')
     if not ai_service: blockers.append('Save a Gemini API key in Settings.')
     slots = [s.strip() for s in settings['posting_times'].split(',')][:settings['daily_shorts_count']]
     now = dt.datetime.now(yt_service.tz)
