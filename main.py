@@ -198,7 +198,7 @@ async def validation_error(request,exc):
 def health(details:bool=False):
     result = {'status':'ok'}
     if details:
-        result['release'] = '2026.10.04-channel-loading'
+        result['release'] = '2026.10.04-channel-loading-r2'
     return result
 
 
